@@ -1,0 +1,216 @@
+<?php
+
+namespace App\Entity;
+
+use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Delete;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\GetCollection;
+use ApiPlatform\Metadata\Link;
+use ApiPlatform\Metadata\Patch;
+use ApiPlatform\Metadata\Post;
+use App\Enum\CardCondition;
+use App\Repository\InventoryItemRepository;
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Serializer\Attribute\Groups;
+use Symfony\Component\Validator\Constraints as Assert;
+
+#[ORM\Entity(repositoryClass: InventoryItemRepository::class)]
+#[ORM\Table(name: 'inventory_items')]
+#[ORM\UniqueConstraint(name: 'UNIQ_INVENTORY_STORE_CARD', fields: ['store', 'card', 'condition', 'isFoil'])]
+#[ApiResource(
+    operations: [
+        new GetCollection(
+            uriTemplate: '/stores/{slug}/inventory',
+            uriVariables: [
+                'slug' => new Link(fromClass: Store::class, identifiers: ['slug']),
+            ],
+            normalizationContext: ['groups' => ['inventory:read']],
+            provider: \App\State\StoreInventoryCollectionProvider::class,
+        ),
+        new Get(
+            uriTemplate: '/stores/{slug}/inventory/{id}',
+            uriVariables: [
+                'slug' => new Link(fromProperty: 'store', fromClass: Store::class, identifiers: ['slug']),
+                'id' => new Link(fromClass: InventoryItem::class),
+            ],
+            normalizationContext: ['groups' => ['inventory:read']],
+            provider: \App\State\StoreInventoryItemProvider::class,
+        ),
+        new Post(
+            uriTemplate: '/stores/{slug}/inventory',
+            uriVariables: [
+                'slug' => new Link(fromClass: Store::class, identifiers: ['slug']),
+            ],
+            read: false,
+            normalizationContext: ['groups' => ['inventory:read']],
+            denormalizationContext: ['groups' => ['inventory:write']],
+            security: "is_granted('STORE_MANAGE', request.attributes.get('store'))",
+            processor: \App\State\StoreInventoryProcessor::class,
+        ),
+        new Patch(
+            uriTemplate: '/stores/{slug}/inventory/{id}',
+            uriVariables: [
+                'slug' => new Link(fromProperty: 'store', fromClass: Store::class, identifiers: ['slug']),
+                'id' => new Link(fromClass: InventoryItem::class),
+            ],
+            normalizationContext: ['groups' => ['inventory:read']],
+            denormalizationContext: ['groups' => ['inventory:write']],
+            security: "is_granted('STORE_MANAGE', object.getStore())",
+            provider: \App\State\StoreInventoryItemProvider::class,
+            processor: \App\State\StoreInventoryProcessor::class,
+        ),
+        new Delete(
+            uriTemplate: '/stores/{slug}/inventory/{id}',
+            uriVariables: [
+                'slug' => new Link(fromProperty: 'store', fromClass: Store::class, identifiers: ['slug']),
+                'id' => new Link(fromClass: InventoryItem::class),
+            ],
+            security: "is_granted('STORE_MANAGE', object.getStore())",
+            provider: \App\State\StoreInventoryItemProvider::class,
+        ),
+    ],
+)]
+class InventoryItem
+{
+    #[ORM\Id]
+    #[ORM\GeneratedValue]
+    #[ORM\Column]
+    #[Groups(['inventory:read'])]
+    private ?int $id = null;
+
+    #[ORM\ManyToOne(inversedBy: 'inventoryItems')]
+    #[ORM\JoinColumn(nullable: false)]
+    private ?Store $store = null;
+
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: false, referencedColumnName: 'id')]
+    #[Groups(['inventory:read'])]
+    private ?Card $card = null;
+
+    #[Groups(['inventory:write'])]
+    private ?string $cardId = null;
+
+    #[ORM\Column]
+    #[Assert\PositiveOrZero]
+    #[Groups(['inventory:read', 'inventory:write'])]
+    private int $quantity = 0;
+
+    #[ORM\Column]
+    #[Assert\PositiveOrZero]
+    #[Groups(['inventory:read', 'inventory:write'])]
+    private int $priceCents = 0;
+
+    #[ORM\Column(enumType: CardCondition::class)]
+    #[Groups(['inventory:read', 'inventory:write'])]
+    private CardCondition $condition = CardCondition::NM;
+
+    #[ORM\Column]
+    #[Groups(['inventory:read', 'inventory:write'])]
+    private bool $isFoil = false;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[Groups(['inventory:read', 'inventory:write'])]
+    private ?string $notes = null;
+
+    public function getId(): ?int
+    {
+        return $this->id;
+    }
+
+    public function getStore(): ?Store
+    {
+        return $this->store;
+    }
+
+    public function setStore(?Store $store): static
+    {
+        $this->store = $store;
+
+        return $this;
+    }
+
+    public function getCard(): ?Card
+    {
+        return $this->card;
+    }
+
+    public function setCard(?Card $card): static
+    {
+        $this->card = $card;
+
+        return $this;
+    }
+
+    public function getCardId(): ?string
+    {
+        return $this->cardId;
+    }
+
+    public function setCardId(?string $cardId): static
+    {
+        $this->cardId = $cardId;
+
+        return $this;
+    }
+
+    public function getQuantity(): int
+    {
+        return $this->quantity;
+    }
+
+    public function setQuantity(int $quantity): static
+    {
+        $this->quantity = $quantity;
+
+        return $this;
+    }
+
+    public function getPriceCents(): int
+    {
+        return $this->priceCents;
+    }
+
+    public function setPriceCents(int $priceCents): static
+    {
+        $this->priceCents = $priceCents;
+
+        return $this;
+    }
+
+    public function getCondition(): CardCondition
+    {
+        return $this->condition;
+    }
+
+    public function setCondition(CardCondition $condition): static
+    {
+        $this->condition = $condition;
+
+        return $this;
+    }
+
+    public function isFoil(): bool
+    {
+        return $this->isFoil;
+    }
+
+    public function setIsFoil(bool $isFoil): static
+    {
+        $this->isFoil = $isFoil;
+
+        return $this;
+    }
+
+    public function getNotes(): ?string
+    {
+        return $this->notes;
+    }
+
+    public function setNotes(?string $notes): static
+    {
+        $this->notes = $notes;
+
+        return $this;
+    }
+}
