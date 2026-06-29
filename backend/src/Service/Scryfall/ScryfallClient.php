@@ -12,6 +12,7 @@ class ScryfallClient
 {
     private const BULK_DATA_URL = 'https://api.scryfall.com/bulk-data';
     private const SEARCH_URL = 'https://api.scryfall.com/cards/search';
+    private const CARD_URL = 'https://api.scryfall.com/cards/';
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
@@ -111,6 +112,33 @@ class ScryfallClient
         return $cards;
     }
 
+    /**
+     * Fetch the full card payload for a single card from Scryfall by its id and
+     * persist every field (plus the complete raw payload) locally.
+     *
+     * Returns null when the card cannot be found on Scryfall.
+     */
+    public function fetchCardById(Uuid $id): ?Card
+    {
+        $response = $this->httpClient->request('GET', self::CARD_URL.$id->toRfc4122(), [
+            'headers' => ['User-Agent' => 'MTGStore/1.0'],
+        ]);
+
+        if (200 !== $response->getStatusCode()) {
+            return null;
+        }
+
+        $data = $response->toArray(false);
+        if (($data['object'] ?? null) === 'error') {
+            return null;
+        }
+
+        $this->upsertFromScryfallData($data);
+        $this->entityManager->flush();
+
+        return $this->cardRepository->find($id);
+    }
+
     /** @param array<string, mixed> $data */
     private function upsertFromScryfallData(array $data): string
     {
@@ -135,6 +163,23 @@ class ScryfallClient
             ->setCmc(isset($data['cmc']) ? (float) $data['cmc'] : null)
             ->setImageUris(isset($data['image_uris']) && is_array($data['image_uris']) ? $data['image_uris'] : null)
             ->setPrices(isset($data['prices']) && is_array($data['prices']) ? $data['prices'] : null)
+            ->setSetName(isset($data['set_name']) ? (string) $data['set_name'] : null)
+            ->setColors(isset($data['colors']) && is_array($data['colors']) ? array_values($data['colors']) : null)
+            ->setColorIdentity(isset($data['color_identity']) && is_array($data['color_identity']) ? array_values($data['color_identity']) : null)
+            ->setKeywords(isset($data['keywords']) && is_array($data['keywords']) ? array_values($data['keywords']) : null)
+            ->setPower(isset($data['power']) ? (string) $data['power'] : null)
+            ->setToughness(isset($data['toughness']) ? (string) $data['toughness'] : null)
+            ->setLoyalty(isset($data['loyalty']) ? (string) $data['loyalty'] : null)
+            ->setArtist(isset($data['artist']) ? (string) $data['artist'] : null)
+            ->setFlavorText(isset($data['flavor_text']) ? (string) $data['flavor_text'] : null)
+            ->setLegalities(isset($data['legalities']) && is_array($data['legalities']) ? $data['legalities'] : null)
+            ->setFinishes(isset($data['finishes']) && is_array($data['finishes']) ? array_values($data['finishes']) : null)
+            ->setGames(isset($data['games']) && is_array($data['games']) ? array_values($data['games']) : null)
+            ->setReleasedAt(isset($data['released_at']) ? new \DateTimeImmutable((string) $data['released_at']) : null)
+            ->setLang(isset($data['lang']) ? (string) $data['lang'] : null)
+            ->setLayout(isset($data['layout']) ? (string) $data['layout'] : null)
+            ->setScryfallUri(isset($data['scryfall_uri']) ? (string) $data['scryfall_uri'] : null)
+            ->setScryfallData($data)
             ->setScryfallUpdatedAt(isset($data['updated_at']) ? new \DateTimeImmutable((string) $data['updated_at']) : null);
 
         if ($isNew) {

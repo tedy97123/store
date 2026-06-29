@@ -58,3 +58,20 @@ export interface ScryfallSyncResult {
   updated: number
   total: number
 }
+
+export interface OrderLine {
+  id: number
+  cardName: string
+  quantity: number
+  priceCents: number
+}
+
+export interface Order {
+  id: number
+  reference: string
+  status: string
+  customerName?: string
+  totalCents: number
+  createdAt: string
+  lines?: OrderLine[]
+}
