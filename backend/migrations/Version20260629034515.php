@@ -10,13 +10,13 @@ use Doctrine\Migrations\AbstractMigration;
 /**
  * Auto-generated Migration: Please modify to your needs!
  */
-final class Version20260629030403 extends AbstractMigration
+final class Version20260629034515 extends AbstractMigration
 {
     public function getDescription(): string
     {
         return '';
     }
-
+    
     public function up(Schema $schema): void
     {
         // this up() migration is auto-generated, please modify it to your needs

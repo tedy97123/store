@@ -29,4 +29,17 @@ class InventoryItemRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    public function findOneByStoreAndId(Store $store, int $id): ?InventoryItem
+    {
+        return $this->createQueryBuilder('i')
+            ->join('i.card', 'c')
+            ->addSelect('c')
+            ->andWhere('i.store = :store')
+            ->andWhere('i.id = :id')
+            ->setParameter('store', $store)
+            ->setParameter('id', $id)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
 }

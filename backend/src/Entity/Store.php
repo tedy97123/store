@@ -87,6 +87,68 @@ class Store
     #[Groups(['store:read', 'store:admin', 'store:admin_write'])]
     private bool $isActive = true;
 
+    #[ORM\Column(options: ['default' => 1000])]
+    #[Assert\PositiveOrZero]
+    #[Groups(['store:read', 'store:admin', 'store:admin_write'])]
+    private int $spotlightMinPriceCents = 1000;
+
+    // --- Storefront branding (managed by the owner via /settings) ---
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #6d5efc.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $primaryColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #ff7a59.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $accentColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #f7f8fa.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $backgroundColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #ffffff.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $surfaceColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #0f172a.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $textColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #64748b.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $mutedColor = null;
+
+    #[ORM\Column(length: 7, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/', message: 'Use a 6-digit hex color like #e7e9ee.')]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $borderColor = null;
+
+    #[ORM\Column(length: 1024, nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $logoUrl = null;
+
+    #[ORM\Column(length: 1024, nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $heroImageUrl = null;
+
+    #[ORM\Column(length: 160, nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $heroHeading = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $heroSubheading = null;
+
+    #[ORM\Column(length: 160, nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $tagline = null;
+
     #[ORM\Column]
     #[Groups(['store:read', 'store:admin'])]
     private \DateTimeImmutable $createdAt;
@@ -150,6 +212,162 @@ class Store
     public function setIsActive(bool $isActive): static
     {
         $this->isActive = $isActive;
+
+        return $this;
+    }
+
+    public function getSpotlightMinPriceCents(): int
+    {
+        return $this->spotlightMinPriceCents;
+    }
+
+    public function setSpotlightMinPriceCents(int $spotlightMinPriceCents): static
+    {
+        $this->spotlightMinPriceCents = $spotlightMinPriceCents;
+
+        return $this;
+    }
+
+    public function getPrimaryColor(): ?string
+    {
+        return $this->primaryColor;
+    }
+
+    public function setPrimaryColor(?string $primaryColor): static
+    {
+        $this->primaryColor = $primaryColor;
+
+        return $this;
+    }
+
+    public function getAccentColor(): ?string
+    {
+        return $this->accentColor;
+    }
+
+    public function setAccentColor(?string $accentColor): static
+    {
+        $this->accentColor = $accentColor;
+
+        return $this;
+    }
+
+    public function getBackgroundColor(): ?string
+    {
+        return $this->backgroundColor;
+    }
+
+    public function setBackgroundColor(?string $backgroundColor): static
+    {
+        $this->backgroundColor = $backgroundColor;
+
+        return $this;
+    }
+
+    public function getSurfaceColor(): ?string
+    {
+        return $this->surfaceColor;
+    }
+
+    public function setSurfaceColor(?string $surfaceColor): static
+    {
+        $this->surfaceColor = $surfaceColor;
+
+        return $this;
+    }
+
+    public function getTextColor(): ?string
+    {
+        return $this->textColor;
+    }
+
+    public function setTextColor(?string $textColor): static
+    {
+        $this->textColor = $textColor;
+
+        return $this;
+    }
+
+    public function getMutedColor(): ?string
+    {
+        return $this->mutedColor;
+    }
+
+    public function setMutedColor(?string $mutedColor): static
+    {
+        $this->mutedColor = $mutedColor;
+
+        return $this;
+    }
+
+    public function getBorderColor(): ?string
+    {
+        return $this->borderColor;
+    }
+
+    public function setBorderColor(?string $borderColor): static
+    {
+        $this->borderColor = $borderColor;
+
+        return $this;
+    }
+
+    public function getLogoUrl(): ?string
+    {
+        return $this->logoUrl;
+    }
+
+    public function setLogoUrl(?string $logoUrl): static
+    {
+        $this->logoUrl = $logoUrl;
+
+        return $this;
+    }
+
+    public function getHeroImageUrl(): ?string
+    {
+        return $this->heroImageUrl;
+    }
+
+    public function setHeroImageUrl(?string $heroImageUrl): static
+    {
+        $this->heroImageUrl = $heroImageUrl;
+
+        return $this;
+    }
+
+    public function getHeroHeading(): ?string
+    {
+        return $this->heroHeading;
+    }
+
+    public function setHeroHeading(?string $heroHeading): static
+    {
+        $this->heroHeading = $heroHeading;
+
+        return $this;
+    }
+
+    public function getHeroSubheading(): ?string
+    {
+        return $this->heroSubheading;
+    }
+
+    public function setHeroSubheading(?string $heroSubheading): static
+    {
+        $this->heroSubheading = $heroSubheading;
+
+        return $this;
+    }
+
+    public function getTagline(): ?string
+    {
+        return $this->tagline;
+    }
+
+    public function setTagline(?string $tagline): static
+    {
+        $this->tagline = $tagline;
 
         return $this;
     }

@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Repository\CardRepository;
+use App\Service\Catalog\CatalogCardResolver;
 use App\Service\Scryfall\ScryfallClient;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -16,6 +17,7 @@ class CardSearchController extends AbstractController
     public function __construct(
         private readonly CardRepository $cardRepository,
         private readonly ScryfallClient $scryfallClient,
+        private readonly CatalogCardResolver $catalogCardResolver,
     ) {
     }
 
@@ -28,32 +30,76 @@ class CardSearchController extends AbstractController
             return $this->json([]);
         }
 
-        $local = $this->cardRepository->searchByName($query, 20);
-        if (count($local) >= 5) {
-            return $this->json(array_map($this->serializeCard(...), $local));
+        $setCode = strtolower(trim((string) $request->query->get('set', '')));
+        $collectorNumber = strtolower(trim((string) $request->query->get('collectorNumber', '')));
+        $rarity = strtolower(trim((string) $request->query->get('rarity', '')));
+        $finish = strtolower(trim((string) $request->query->get('finish', '')));
+        if (!in_array($finish, ['foil', 'nonfoil'], true)) {
+            $finish = '';
         }
 
-        $remote = $this->scryfallClient->searchRemoteAndUpsert($query, 20);
+        $local = array_filter(
+            $this->cardRepository->searchByName($query, 60),
+            fn (\App\Entity\Card $card): bool => $this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish),
+        );
+        $remote = $this->scryfallClient->searchRemoteAndUpsert(
+            $query,
+            40,
+            '' !== $setCode ? $setCode : null,
+            '' !== $finish ? $finish : null,
+        );
         $merged = [];
         foreach (array_merge($local, $remote) as $card) {
-            $merged[(string) $card->getId()] = $card;
+            if ($this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish)) {
+                $merged[(string) $card->getId()] = $card;
+            }
         }
 
-        return $this->json(array_map($this->serializeCard(...), array_values($merged)));
+        return $this->json(array_map(
+            $this->catalogCardResolver->serializeCard(...),
+            array_slice(array_values($merged), 0, 40),
+        ));
     }
 
-    private function serializeCard(\App\Entity\Card $card): array
+    #[Route('/resolve-batch', name: 'api_catalog_resolve_batch', methods: ['POST'])]
+    #[IsGranted('ROLE_USER')]
+    public function resolveBatch(Request $request): JsonResponse
     {
-        return [
-            'id' => (string) $card->getId(),
-            'oracleId' => (string) $card->getOracleId(),
-            'name' => $card->getName(),
-            'setCode' => $card->getSetCode(),
-            'collectorNumber' => $card->getCollectorNumber(),
-            'rarity' => $card->getRarity(),
-            'manaCost' => $card->getManaCost(),
-            'typeLine' => $card->getTypeLine(),
-            'imageUrl' => $card->getImageUrl(),
-        ];
+        /** @var array{rows?: list<array<string, mixed>>} $payload */
+        $payload = json_decode($request->getContent(), true) ?? [];
+        $rows = is_array($payload['rows'] ?? null) ? $payload['rows'] : [];
+        $results = [];
+
+        foreach ($rows as $row) {
+            $rowIndex = (int) ($row['rowIndex'] ?? count($results));
+            $name = trim((string) ($row['name'] ?? ''));
+            $setCode = trim((string) ($row['set'] ?? ''));
+            $collectorNumber = trim((string) ($row['collectorNumber'] ?? ''));
+            $rarity = trim((string) ($row['rarity'] ?? ''));
+            $finish = ((bool) ($row['foil'] ?? false)) ? 'foil' : 'nonfoil';
+
+            if ('' === $name || '' === $setCode) {
+                $results[] = [
+                    'rowIndex' => $rowIndex,
+                    'error' => 'Name and set are required for MTGJSON matching.',
+                ];
+                continue;
+            }
+
+            $resolution = $this->catalogCardResolver->resolve($name, $setCode, $collectorNumber, $rarity, $finish);
+            if ($resolution->isResolved() && $resolution->card instanceof \App\Entity\Card) {
+                $results[] = [
+                    'rowIndex' => $rowIndex,
+                    'card' => $this->catalogCardResolver->serializeCard($resolution->card),
+                ];
+                continue;
+            }
+            $results[] = [
+                'rowIndex' => $rowIndex,
+                'error' => $resolution->error ?? 'No matching MTGJSON or Scryfall printing found.',
+            ];
+        }
+
+        return $this->json(['results' => $results]);
     }
 }

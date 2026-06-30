@@ -15,7 +15,12 @@ interface AuthContextValue {
   token: string | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, displayName: string) => Promise<void>
+  register: (
+    email: string,
+    password: string,
+    displayName: string,
+    accountType: 'owner' | 'customer' | 'admin',
+  ) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
   isSuperAdmin: boolean
@@ -52,23 +57,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshUser()
   }, [refreshUser])
 
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const { data } = await api.post<{ token: string }>('/login', { email, password })
     localStorage.setItem('token', data.token)
     setToken(data.token)
     await refreshUser()
-  }
+  }, [refreshUser])
 
-  const register = async (email: string, password: string, displayName: string) => {
-    await api.post('/register', { email, password, displayName })
+  const register = useCallback(async (
+    email: string,
+    password: string,
+    displayName: string,
+    accountType: 'owner' | 'customer' | 'admin',
+  ) => {
+    await api.post('/register', { email, password, displayName, accountType })
     await login(email, password)
-  }
+  }, [login])
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('token')
     setToken(null)
     setUser(null)
-  }
+  }, [])
 
   const value = useMemo(
     () => ({
@@ -84,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (user?.roles.includes('ROLE_STORE_OWNER') ?? false) ||
         (user?.ownedStores?.length ?? 0) > 0,
     }),
-    [user, token, loading, refreshUser],
+    [user, token, loading, login, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
