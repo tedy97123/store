@@ -1,5 +1,73 @@
 @import "tailwindcss";
 
+/*
+ * Fonts: bundled (self-hosted) via @fontsource — no Google CDN.
+ * Lato        = UI sans-serif.
+ * Zilla Slab  = free MuseoSlab-style slab substitute for display headings.
+ * NOTE: licensed MuseoSlab / Aller can later replace Zilla Slab / Lato —
+ * just swap the @fontsource imports below and the --font-* tokens in @theme.
+ */
+@import "@fontsource/lato/400.css";
+@import "@fontsource/lato/700.css";
+@import "@fontsource/lato/900.css";
+@import "@fontsource/zilla-slab/600.css";
+@import "@fontsource/zilla-slab/700.css";
+
+@theme {
+  /* Brand — violet primary accent */
+  --color-brand-50: #f1efff;
+  --color-brand-100: #e4e0ff;
+  --color-brand-200: #cfc8ff;
+  --color-brand-300: #b0a4ff;
+  --color-brand-400: #8d7bff;
+  --color-brand-500: #6d5efc; /* primary accent */
+  --color-brand-600: #5b4ce0; /* hover */
+  --color-brand-700: #4a3dc4;
+
+  /* Secondary / highlight (coral) */
+  --color-accent-500: #ff7a59;
+
+  /* Neutrals — single ramp */
+  --color-fg: #0f172a; /* primary text */
+  --color-fg-muted: #64748b; /* secondary text */
+  --color-bg: #f7f8fa; /* app background */
+  --color-surface: #ffffff; /* cards / panels */
+  --color-border: #e7e9ee; /* hairline borders */
+
+  /* Status */
+  --color-success-50: #ecfdf3;
+  --color-success-500: #12b76a;
+  --color-success-700: #027a48;
+  --color-warning-50: #fffaeb;
+  --color-warning-500: #f79009;
+  --color-warning-700: #b54708;
+  --color-danger-50: #fef3f2;
+  --color-danger-500: #f04438;
+  --color-danger-700: #b42318;
+
+  /* Radii / shadows */
+  --radius-card: 16px;
+  --radius-btn: 10px;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
+
+  /* Fonts */
+  --font-sans: "Lato", "Aller", system-ui, -apple-system, sans-serif;
+  --font-display: "Zilla Slab", "MuseoSlab", "Lato", serif;
+}
+
 body {
-  @apply bg-slate-950 text-slate-100 min-h-screen;
+  @apply min-h-screen bg-bg text-fg font-sans antialiased;
+}
+
+::selection {
+  background: var(--color-brand-500);
+  color: #fff;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  @apply transition;
 }

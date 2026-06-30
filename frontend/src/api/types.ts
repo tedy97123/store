@@ -1,8 +1,29 @@
+export interface ApiError {
+  response?: {
+    status?: number
+    data?: unknown
+  }
+}
+
 export interface Store {
   id: number
   name: string
   slug: string
   isActive?: boolean
+  spotlightMinPriceCents?: number
+  // Storefront branding (owner-managed via /settings)
+  primaryColor?: string | null
+  accentColor?: string | null
+  backgroundColor?: string | null
+  surfaceColor?: string | null
+  textColor?: string | null
+  mutedColor?: string | null
+  borderColor?: string | null
+  logoUrl?: string | null
+  heroImageUrl?: string | null
+  heroHeading?: string | null
+  heroSubheading?: string | null
+  tagline?: string | null
   owner?: {
     id: number
     email: string
@@ -16,15 +37,43 @@ export interface CardSummary {
   oracleId?: string
   name: string
   setCode?: string
+  setName?: string
   collectorNumber?: string
   rarity?: string
   manaCost?: string
   typeLine?: string
+  oracleText?: string
+  cmc?: number
   imageUrl?: string
   imageUris?: {
     normal?: string
     small?: string
+    large?: string
+    png?: string
   }
+  prices?: {
+    usd?: string | null
+    usd_foil?: string | null
+    usd_etched?: string | null
+    eur?: string | null
+    eur_foil?: string | null
+    tix?: string | null
+  }
+  colors?: string[]
+  colorIdentity?: string[]
+  keywords?: string[]
+  power?: string
+  toughness?: string
+  loyalty?: string
+  artist?: string
+  flavorText?: string
+  legalities?: Record<string, string>
+  finishes?: string[]
+  games?: string[]
+  releasedAt?: string
+  lang?: string
+  layout?: string
+  scryfallUri?: string
 }
 
 export interface InventoryItem {
@@ -35,6 +84,93 @@ export interface InventoryItem {
   isFoil: boolean
   notes?: string | null
   card: CardSummary
+}
+
+export interface StoreCustomer {
+  // `id` is null when the current user has no saved profile for the store yet
+  // (the GET endpoint returns an empty representation rather than persisting one).
+  id: number | null
+  phone?: string | null
+  shippingAddress?: string | null
+  paymentBrand?: string | null
+  paymentLast4?: string | null
+  paymentExpires?: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface CustomerFavorite {
+  id: number
+  inventoryItem: InventoryItem
+  createdAt: string
+}
+
+export interface CustomerWantListEntry {
+  id: number
+  card?: CardSummary | null
+  cardName: string
+  setCode?: string | null
+  isFoil: boolean
+  quantity: number
+  notes?: string | null
+  createdAt: string
+}
+
+export type CsvImportJobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'paused' | 'cancelled'
+
+export type CsvImportRowStatus = 'queued' | 'processing' | 'imported' | 'error'
+
+export interface CsvImportRow {
+  rowIndex: number
+  name: string
+  game: string
+  set: string
+  condition: string
+  isFoil: boolean
+  rarity: string
+  quantity: number
+  variant: string
+  collectorNumber: string
+  status: CsvImportRowStatus
+  card?: CardSummary | null
+  error?: string | null
+  importedItemId?: number
+}
+
+export interface CsvImportJob {
+  id: number
+  status: CsvImportJobStatus
+  originalFilename: string
+  storagePath: string
+  totalRows: number
+  processedRows: number
+  importedRows: number
+  failedRows: number
+  queuedRows: number
+  processingRows: number
+  errorMessage?: string | null
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  finishedAt?: string | null
+  rowOffset: number
+  rowLimit: number
+  rows: CsvImportRow[]
+}
+
+export interface CsvImportJobSummary {
+  id: number
+  status: CsvImportJobStatus
+  originalFilename: string
+  totalRows: number
+  processedRows: number
+  importedRows: number
+  failedRows: number
+  errorMessage?: string | null
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  finishedAt?: string | null
 }
 
 export interface UserProfile {
