@@ -13,6 +13,9 @@ class ScryfallClient
     private const BULK_DATA_URL = 'https://api.scryfall.com/bulk-data';
     private const SEARCH_URL = 'https://api.scryfall.com/cards/search';
     private const CARD_URL = 'https://api.scryfall.com/cards/';
+    private const MIN_REQUEST_INTERVAL_MICROSECONDS = 125000;
+
+    private static int $lastRequestAt = 0;
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
@@ -28,14 +31,31 @@ class ScryfallClient
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
         ]);
 
+        if (200 !== $response->getStatusCode()) {
+            throw new \RuntimeException(sprintf('Scryfall bulk-data request failed with status %d.', $response->getStatusCode()));
+        }
+
         $payload = $response->toArray();
-        foreach ($payload['data'] as $item) {
-            if (($item['type'] ?? '') === 'oracle_cards') {
-                return [
-                    'download_uri' => $item['download_uri'],
-                    'updated_at' => $item['updated_at'],
-                ];
+        $items = $payload['data'] ?? null;
+        if (!is_array($items)) {
+            throw new \RuntimeException('Scryfall bulk-data response is missing a "data" array.');
+        }
+
+        foreach ($items as $item) {
+            if (!is_array($item) || ($item['type'] ?? '') !== 'oracle_cards') {
+                continue;
             }
+
+            $downloadUri = $item['download_uri'] ?? null;
+            $updatedAt = $item['updated_at'] ?? null;
+            if (!is_string($downloadUri) || '' === $downloadUri || !is_string($updatedAt) || '' === $updatedAt) {
+                throw new \RuntimeException('oracle_cards bulk data entry is missing download_uri or updated_at.');
+            }
+
+            return [
+                'download_uri' => $downloadUri,
+                'updated_at' => $updatedAt,
+            ];
         }
 
         throw new \RuntimeException('oracle_cards bulk data not found.');
@@ -53,9 +73,57 @@ class ScryfallClient
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
         ]);
 
-        $content = $response->getContent();
-        /** @var list<array<string, mixed>> $cards */
-        $cards = json_decode($content, true, flags: JSON_THROW_ON_ERROR);
+        if (200 !== $response->getStatusCode()) {
+            throw new \RuntimeException(sprintf('Scryfall bulk download failed with status %d.', $response->getStatusCode()));
+        }
+
+        // Stream the (~100+ MB) bulk JSON to a temp file instead of holding the
+        // entire HTTP body string in memory. We open a writable resource and let
+        // HttpClient::stream() push chunks into it as they arrive.
+        $tmpPath = tempnam(sys_get_temp_dir(), 'scryfall_oracle_');
+        if (false === $tmpPath) {
+            throw new \RuntimeException('Unable to allocate a temp file for the Scryfall bulk download.');
+        }
+
+        $handle = fopen($tmpPath, 'wb');
+        if (false === $handle) {
+            @unlink($tmpPath);
+            throw new \RuntimeException('Unable to open the temp file for the Scryfall bulk download.');
+        }
+
+        try {
+            foreach ($this->httpClient->stream($response) as $chunk) {
+                $content = $chunk->getContent();
+                if ('' !== $content) {
+                    fwrite($handle, $content);
+                }
+                unset($content);
+            }
+            fclose($handle);
+            // Free the response so its internal buffers can be reclaimed promptly.
+            unset($response);
+
+            // NOTE: We still decode the whole document at once here, so peak
+            // memory is bounded by the decoded card array, not the raw body.
+            // The clear()-every-batch loop below further bounds Doctrine's UoW
+            // growth. This bounds — but does not eliminate — peak memory; a true
+            // streaming JSON parser (e.g. halaxa/json-machine) iterating the
+            // top-level array without materialising it is the longer-term fix,
+            // but that would add a composer dependency.
+            $content = file_get_contents($tmpPath);
+            if (false === $content) {
+                throw new \RuntimeException('Unable to read the downloaded Scryfall bulk file.');
+            }
+
+            /** @var list<array<string, mixed>> $cards */
+            $cards = json_decode($content, true, flags: JSON_THROW_ON_ERROR);
+            unset($content);
+        } finally {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+            @unlink($tmpPath);
+        }
 
         $inserted = 0;
         $updated = 0;
@@ -73,7 +141,10 @@ class ScryfallClient
             }
 
             $this->entityManager->flush();
+            // Detach managed entities every batch to bound the unit-of-work size.
             $this->entityManager->clear();
+            // Drop the processed chunk so it can be garbage collected.
+            unset($chunk);
 
             if (null !== $onProgress) {
                 $processed = min(($chunkIndex + 1) * $batchSize, $total);
@@ -85,20 +156,46 @@ class ScryfallClient
     }
 
     /** @return list<Card> */
-    public function searchRemoteAndUpsert(string $query, int $limit = 20): array
+    public function searchRemoteAndUpsert(string $query, int $limit = 20, ?string $setCode = null, ?string $finish = null): array
     {
-        $response = $this->httpClient->request('GET', self::SEARCH_URL, [
+        $scryfallQuery = $query;
+        if (null !== $setCode && '' !== $setCode) {
+            $scryfallQuery .= ' set:'.strtolower($setCode);
+        }
+        if ('foil' === $finish) {
+            $scryfallQuery .= ' is:foil';
+        } elseif ('nonfoil' === $finish) {
+            $scryfallQuery .= ' is:nonfoil';
+        }
+
+        $response = $this->requestWithRateLimit('GET', self::SEARCH_URL, [
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
-            'query' => ['q' => $query, 'unique' => 'cards'],
+            'query' => ['q' => $scryfallQuery, 'unique' => 'prints'],
         ]);
 
-        if (404 === $response->getStatusCode()) {
+        $status = $response->getStatusCode();
+        // Scryfall returns 404 when a search yields no results — treat as empty.
+        if (404 === $status) {
             return [];
         }
 
-        $payload = $response->toArray();
+        if ($status < 200 || $status >= 300) {
+            throw new \RuntimeException(sprintf('Scryfall search request failed with status %d.', $status));
+        }
+
+        // Use toArray(false) so a non-throwing decode lets us guard the shape ourselves.
+        $payload = $response->toArray(false);
+        $data = $payload['data'] ?? null;
+        if (!is_array($data)) {
+            return [];
+        }
+
         $cards = [];
-        foreach (array_slice($payload['data'] ?? [], 0, $limit) as $cardData) {
+        foreach (array_slice($data, 0, $limit) as $cardData) {
+            if (!is_array($cardData) || !isset($cardData['id'])) {
+                continue;
+            }
+
             $this->upsertFromScryfallData($cardData);
             $id = Uuid::fromString($cardData['id']);
             $card = $this->cardRepository->find($id);
@@ -120,7 +217,7 @@ class ScryfallClient
      */
     public function fetchCardById(Uuid $id): ?Card
     {
-        $response = $this->httpClient->request('GET', self::CARD_URL.$id->toRfc4122(), [
+        $response = $this->requestWithRateLimit('GET', self::CARD_URL.$id->toRfc4122(), [
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
         ]);
 
@@ -137,6 +234,32 @@ class ScryfallClient
         $this->entityManager->flush();
 
         return $this->cardRepository->find($id);
+    }
+
+    /** @param array<string, mixed> $options */
+    private function requestWithRateLimit(string $method, string $url, array $options): \Symfony\Contracts\HttpClient\ResponseInterface
+    {
+        $now = (int) floor(microtime(true) * 1_000_000);
+        $elapsed = $now - self::$lastRequestAt;
+        if ($elapsed < self::MIN_REQUEST_INTERVAL_MICROSECONDS) {
+            usleep(self::MIN_REQUEST_INTERVAL_MICROSECONDS - $elapsed);
+        }
+
+        $response = $this->httpClient->request($method, $url, $options);
+        self::$lastRequestAt = (int) floor(microtime(true) * 1_000_000);
+
+        if (429 !== $response->getStatusCode()) {
+            return $response;
+        }
+
+        $headers = $response->getHeaders(false);
+        $retryAfter = isset($headers['retry-after'][0]) ? (float) $headers['retry-after'][0] : 1.0;
+        usleep(max(1, (int) ceil($retryAfter * 1_000_000)));
+
+        $response = $this->httpClient->request($method, $url, $options);
+        self::$lastRequestAt = (int) floor(microtime(true) * 1_000_000);
+
+        return $response;
     }
 
     /** @param array<string, mixed> $data */

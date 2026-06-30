@@ -54,11 +54,11 @@ class Card
     private ?string $typeLine = null;
 
     #[ORM\Column(type: 'text', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $oracleText = null;
 
     #[ORM\Column(type: 'float', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?float $cmc = null;
 
     /** @var array<string, mixed>|null */
@@ -68,7 +68,7 @@ class Card
 
     /** @var array<string, mixed>|null */
     #[ORM\Column(type: 'json', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?array $prices = null;
 
     #[ORM\Column(length: 255, nullable: true)]
@@ -87,58 +87,58 @@ class Card
 
     /** @var list<string>|null */
     #[ORM\Column(type: 'json', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?array $keywords = null;
 
     #[ORM\Column(length: 16, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $power = null;
 
     #[ORM\Column(length: 16, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $toughness = null;
 
     #[ORM\Column(length: 16, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $loyalty = null;
 
     #[ORM\Column(length: 255, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $artist = null;
 
     #[ORM\Column(type: 'text', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $flavorText = null;
 
     /** @var array<string, mixed>|null */
     #[ORM\Column(type: 'json', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?array $legalities = null;
 
     /** @var list<string>|null */
     #[ORM\Column(type: 'json', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?array $finishes = null;
 
     /** @var list<string>|null */
     #[ORM\Column(type: 'json', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?array $games = null;
 
     #[ORM\Column(type: 'date_immutable', nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?\DateTimeImmutable $releasedAt = null;
 
     #[ORM\Column(length: 16, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $lang = null;
 
     #[ORM\Column(length: 32, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $layout = null;
 
     #[ORM\Column(length: 512, nullable: true)]
-    #[Groups(['card:read'])]
+    #[Groups(['card:read', 'inventory:read'])]
     private ?string $scryfallUri = null;
 
     /**

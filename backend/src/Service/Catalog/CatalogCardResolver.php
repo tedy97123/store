@@ -1,0 +1,256 @@
+<?php
+
+namespace App\Service\Catalog;
+
+use App\DTO\CatalogResolutionResult;
+use App\Entity\Card;
+use App\Repository\CardRepository;
+use App\Service\MTGJson\MTGJsonClient;
+use App\Service\Scryfall\ScryfallClient;
+use Symfony\Component\Uid\Uuid;
+
+final readonly class CatalogCardResolver
+{
+    public function __construct(
+        private CardRepository $cardRepository,
+        private MTGJsonClient $mtgJsonClient,
+        private ScryfallClient $scryfallClient,
+    ) {
+    }
+
+    public function resolve(
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): CatalogResolutionResult {
+        $localCard = $this->matchLocalCard($name, $setCode, $collectorNumber, $rarity, $finish);
+        if ($localCard instanceof Card) {
+            return new CatalogResolutionResult($localCard);
+        }
+
+        try {
+            $mtgJsonCard = $this->matchMtgJsonCard($name, $setCode, $collectorNumber, $rarity, $finish);
+        } catch (\Throwable $e) {
+            $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
+            if ($fallbackCard instanceof Card) {
+                return new CatalogResolutionResult($fallbackCard);
+            }
+
+            return new CatalogResolutionResult(null, 'MTGJSON lookup failed and Scryfall fallback found no match: '.$e->getMessage());
+        }
+
+        if (null === $mtgJsonCard) {
+            $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
+            if ($fallbackCard instanceof Card) {
+                return new CatalogResolutionResult($fallbackCard);
+            }
+
+            return new CatalogResolutionResult(null, 'No matching MTGJSON or Scryfall printing found.');
+        }
+
+        return $this->resolveByMtgJsonScryfallId($mtgJsonCard);
+    }
+
+    /**
+     * Resolve a matched MTGJSON card to a local/Scryfall Card via its Scryfall id.
+     *
+     * @param array<string, mixed> $mtgJsonCard
+     */
+    private function resolveByMtgJsonScryfallId(array $mtgJsonCard): CatalogResolutionResult
+    {
+        $scryfallId = $mtgJsonCard['identifiers']['scryfallId'] ?? null;
+        if (!is_string($scryfallId) || '' === $scryfallId) {
+            return new CatalogResolutionResult(null, 'Matched MTGJSON card does not include a Scryfall ID.');
+        }
+
+        try {
+            $id = Uuid::fromString($scryfallId);
+        } catch (\InvalidArgumentException) {
+            return new CatalogResolutionResult(null, 'Matched card has an invalid Scryfall ID.');
+        }
+
+        try {
+            $card = $this->cardRepository->find($id) ?? $this->scryfallClient->fetchCardById($id);
+        } catch (\Throwable $e) {
+            return new CatalogResolutionResult(null, 'Scryfall lookup failed: '.$e->getMessage());
+        }
+
+        if (!$card instanceof Card) {
+            return new CatalogResolutionResult(null, 'Could not fetch matched Scryfall card.');
+        }
+
+        return new CatalogResolutionResult($card);
+    }
+
+    public function serializeCard(Card $card): array
+    {
+        return [
+            'id' => (string) $card->getId(),
+            'oracleId' => (string) $card->getOracleId(),
+            'name' => $card->getName(),
+            'setCode' => $card->getSetCode(),
+            'setName' => $card->getSetName(),
+            'collectorNumber' => $card->getCollectorNumber(),
+            'rarity' => $card->getRarity(),
+            'manaCost' => $card->getManaCost(),
+            'typeLine' => $card->getTypeLine(),
+            'oracleText' => $card->getOracleText(),
+            'cmc' => $card->getCmc(),
+            'imageUrl' => $card->getImageUrl(),
+            'imageUris' => $card->getImageUris(),
+            'prices' => $card->getPrices(),
+            'colors' => $card->getColors(),
+            'colorIdentity' => $card->getColorIdentity(),
+            'keywords' => $card->getKeywords(),
+            'power' => $card->getPower(),
+            'toughness' => $card->getToughness(),
+            'loyalty' => $card->getLoyalty(),
+            'artist' => $card->getArtist(),
+            'flavorText' => $card->getFlavorText(),
+            'legalities' => $card->getLegalities(),
+            'finishes' => $card->getFinishes(),
+            'games' => $card->getGames(),
+            'releasedAt' => $card->getReleasedAt()?->format('Y-m-d'),
+            'lang' => $card->getLang(),
+            'layout' => $card->getLayout(),
+            'scryfallUri' => $card->getScryfallUri(),
+        ];
+    }
+
+    /**
+     * Shared catalog filter predicate. Both the search controller and the
+     * resolver use this so the matching rules stay in one place. Filter values
+     * are compared case-insensitively, so callers may pass them raw or lowercased.
+     */
+    public function matchesFilters(
+        Card $card,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): bool {
+        if ('' !== $setCode && strtolower($card->getSetCode()) !== strtolower($setCode)) {
+            return false;
+        }
+
+        if ('' !== $collectorNumber && strtolower($card->getCollectorNumber()) !== strtolower($collectorNumber)) {
+            return false;
+        }
+
+        if ('' !== $rarity && strtolower((string) $card->getRarity()) !== strtolower($rarity)) {
+            return false;
+        }
+
+        if ('' !== $finish) {
+            $finishes = $card->getFinishes() ?? [];
+            if (!in_array($finish, $finishes, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function matchMtgJsonCard(
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): ?array {
+        $cards = $this->mtgJsonClient->getSetCards($setCode);
+        $normalizedName = $this->normalizeMatchValue($name);
+        $normalizedCollectorNumber = $this->normalizeMatchValue($collectorNumber);
+        $normalizedRarity = $this->normalizeMatchValue($rarity);
+
+        foreach ($cards as $card) {
+            $cardName = $this->normalizeMatchValue((string) ($card['name'] ?? ''));
+            $cardNumber = $this->normalizeMatchValue((string) ($card['number'] ?? ''));
+            $cardRarity = $this->normalizeMatchValue((string) ($card['rarity'] ?? ''));
+            $cardFinishes = isset($card['finishes']) && is_array($card['finishes']) ? $card['finishes'] : [];
+
+            if ($cardName !== $normalizedName) {
+                continue;
+            }
+            if ('' !== $normalizedCollectorNumber && $cardNumber !== $normalizedCollectorNumber) {
+                continue;
+            }
+            if ('' !== $normalizedRarity && $cardRarity !== $normalizedRarity) {
+                continue;
+            }
+            if ([] !== $cardFinishes && !in_array($finish, $cardFinishes, true)) {
+                continue;
+            }
+
+            return $card;
+        }
+
+        return null;
+    }
+
+    private function normalizeMatchValue(string $value): string
+    {
+        return strtolower(trim($value));
+    }
+
+    private function resolveViaScryfallSearch(
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): ?Card {
+        try {
+            $cards = $this->scryfallClient->searchRemoteAndUpsert($name, 10, $setCode, $finish);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        foreach ($cards as $card) {
+            if (!$this->matchesFilters(
+                $card,
+                strtolower($setCode),
+                strtolower($collectorNumber),
+                strtolower($rarity),
+                $finish,
+            )) {
+                continue;
+            }
+
+            if ($this->normalizeMatchValue($card->getName()) === $this->normalizeMatchValue($name)) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    private function matchLocalCard(
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): ?Card {
+        foreach ($this->cardRepository->searchByName($name, 20) as $card) {
+            if (!$this->matchesFilters(
+                $card,
+                strtolower($setCode),
+                strtolower($collectorNumber),
+                strtolower($rarity),
+                $finish,
+            )) {
+                continue;
+            }
+
+            if ($this->normalizeMatchValue($card->getName()) === $this->normalizeMatchValue($name)) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+}
