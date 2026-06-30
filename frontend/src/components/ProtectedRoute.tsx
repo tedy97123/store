@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { LoadingPanel } from './ui'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -16,11 +17,7 @@ export default function ProtectedRoute({
   const location = useLocation()
 
   if (loading) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-slate-400">
-        Loading...
-      </div>
-    )
+    return <LoadingPanel label="Loading…" />
   }
 
   if (!user) {

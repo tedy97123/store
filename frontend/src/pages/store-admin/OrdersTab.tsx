@@ -1,6 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
-import api, { formatPrice, unwrapCollection } from '../../api/client'
+import { ReceiptText } from 'lucide-react'
+import api, { formatPrice, httpStatus, unwrapCollection } from '../../api/client'
 import type { Order } from '../../api/types'
+import {
+  Card,
+  CardHeader,
+  CardBody,
+  Table,
+  THead,
+  TBody,
+  TR,
+  TH,
+  TD,
+  Badge,
+  LoadingPanel,
+  EmptyState,
+  ErrorState,
+} from '../../components/ui'
 
 export default function OrdersTab({ slug }: { slug: string }) {
   const { data, isLoading, error } = useQuery({
@@ -13,66 +29,78 @@ export default function OrdersTab({ slug }: { slug: string }) {
   })
 
   // The orders endpoint may not be implemented on the backend yet.
-  const status = (error as { response?: { status?: number } } | null)?.response?.status
+  const status = httpStatus(error)
   const endpointMissing = status === 404 || status === 405
 
+  if (isLoading) {
+    return <LoadingPanel label="Loading orders…" />
+  }
+
+  if (endpointMissing) {
+    return (
+      <Card>
+        <CardBody>
+          <EmptyState
+            icon={ReceiptText}
+            title="Orders backend not available yet"
+            description={
+              <>
+                This page expects a <code className="text-fg">GET /api/stores/{slug}/orders</code> endpoint.
+                Once an Order entity and API resource are added on the backend, orders will appear here
+                automatically.
+              </>
+            }
+          />
+        </CardBody>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return <ErrorState title="Failed to load orders" description="Please try again." />
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <Card>
+        <CardBody>
+          <EmptyState icon={ReceiptText} title="No orders yet" description="Customer orders will appear here." />
+        </CardBody>
+      </Card>
+    )
+  }
+
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Orders</h2>
-
-      {isLoading && <p className="text-sm text-slate-400">Loading orders…</p>}
-
-      {endpointMissing && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm">
-          <p className="font-medium text-amber-300">Orders backend not available yet</p>
-          <p className="mt-1 text-slate-300">
-            This page expects a <code className="text-amber-300">GET /api/stores/{slug}/orders</code>{' '}
-            endpoint. Once an Order entity and API resource are added on the backend, orders will
-            appear here automatically.
-          </p>
-        </div>
-      )}
-
-      {error && !endpointMissing && (
-        <p className="text-sm text-red-400">Failed to load orders.</p>
-      )}
-
-      {data && data.length === 0 && (
-        <p className="text-sm text-slate-500">No orders yet.</p>
-      )}
-
-      {data && data.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-slate-800">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-900 text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Reference</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Total</th>
-                <th className="px-4 py-3">Placed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((order) => (
-                <tr key={order.id} className="border-t border-slate-800">
-                  <td className="px-4 py-3 font-mono text-xs">{order.reference}</td>
-                  <td className="px-4 py-3">{order.customerName ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs uppercase">
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{formatPrice(order.totalCents)}</td>
-                  <td className="px-4 py-3 text-slate-400">
-                    {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    <Card>
+      <CardHeader title="Orders" subtitle="Customer orders for this store." />
+      <CardBody className="p-0">
+        <Table>
+          <THead>
+            <TR className="hover:bg-transparent">
+              <TH>Reference</TH>
+              <TH>Customer</TH>
+              <TH>Status</TH>
+              <TH>Total</TH>
+              <TH>Placed</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {data.map((order) => (
+              <TR key={order.id}>
+                <TD className="font-mono text-xs">{order.reference}</TD>
+                <TD>{order.customerName ?? '—'}</TD>
+                <TD>
+                  <Badge className="uppercase">{order.status}</Badge>
+                </TD>
+                <TD>{formatPrice(order.totalCents)}</TD>
+                <TD className="text-fg-muted">
+                  {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : '—'}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      </CardBody>
+    </Card>
   )
 }
