@@ -120,6 +120,7 @@ final readonly class CatalogCardResolver
             'cmc' => $card->getCmc(),
             'imageUrl' => $card->getImageUrl(),
             'imageUris' => $card->getImageUris(),
+            'cardFaces' => $card->getCardFaces(),
             'prices' => $card->getPrices(),
             'colors' => $card->getColors(),
             'colorIdentity' => $card->getColorIdentity(),

@@ -7,6 +7,9 @@ export type { CardRowProps } from './CardRow'
 export { InteractiveCard } from './InteractiveCard'
 export type { InteractiveCardProps } from './InteractiveCard'
 
+export { FlipCard } from './FlipCard'
+export type { FlipCardProps } from './FlipCard'
+
 export { SpotlightCard } from './SpotlightCard'
 export type { SpotlightCardProps } from './SpotlightCard'
 

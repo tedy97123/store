@@ -26,8 +26,13 @@ final readonly class StoreInventoryItemProvider implements ProviderInterface
             throw new NotFoundHttpException('Store not found.');
         }
 
-        $item = $this->inventoryRepository->find($uriVariables['id'] ?? null);
-        if (!$item instanceof InventoryItem || $item->getStore()?->getId() !== $store->getId()) {
+        // Eager-fetch the card (JOIN + addSelect) so the fully hydrated Card —
+        // including scryfallData, which powers getCardFaces() for multi-faced
+        // cards — is available to the serializer. A bare find() leaves card as a
+        // lazy proxy whose scryfallData-derived virtual fields serialize empty.
+        $id = $uriVariables['id'] ?? null;
+        $item = is_numeric($id) ? $this->inventoryRepository->findOneByStoreAndId($store, (int) $id) : null;
+        if (!$item instanceof InventoryItem) {
             throw new NotFoundHttpException('Inventory item not found.');
         }
 
