@@ -28,7 +28,7 @@ Every request flows through the same five layers. Diagrams are labelled by layer
 | **Auth & tenancy** | Login, register, `/me`, JWT mechanics, role-based access (voters), the tenant SQL filter | [auth-and-tenancy.md](auth-and-tenancy.md) |
 | **Stores & branding** | Public store directory, storefront by slug, branding/theme editor, platform admin (stores & users) | [stores-and-branding.md](stores-and-branding.md) |
 | **Catalog & inventory** | Card catalog search, inventory browse, inventory CRUD, Scryfall bulk sync, card details, spotlight | [catalog-and-inventory.md](catalog-and-inventory.md) |
-| **CSV import** | Async bulk import lifecycle: upload → queue → batched worker → card resolution → inventory write → live polling | [csv-import.md](csv-import.md) |
+| **CSV import** | Async bulk import lifecycle, failed-row recovery, card resolution, inventory writes, and live polling | [csv-import.md](csv-import.md) |
 | **Customers & orders** | Per-store customer profiles, favorites, want lists, orders, and sales reports | [customers-and-orders.md](customers-and-orders.md) |
 
 ## System context
@@ -71,5 +71,5 @@ flowchart LR
 
 - **Multi-tenancy** — `TenantSubscriber` reads `{slug}` from `/api/stores/{slug}/*`, resolves the `Store`, and enables a Doctrine SQL filter (`TenantFilter`) that auto-scopes `InventoryItem` and `Order` queries by `store_id`. `/api/admin/*` routes disable the filter so super-admins see everything. See [auth-and-tenancy.md](auth-and-tenancy.md#multi-tenancy-filter).
 - **Create-on-write** — customer profile / favorites / want-list `GET`s never mutate (return empty if no row); the `StoreCustomer` row is created lazily on first `PUT`/`POST`/`PATCH`. See [customers-and-orders.md](customers-and-orders.md).
-- **Card resolution cascade** — local DB → MTGJSON → Scryfall, used by both catalog search and CSV import. See [catalog-and-inventory.md](catalog-and-inventory.md#card-resolution-cascade).
+- **Card resolution cascade** — local DB -> Scryfall -> MTGJSON, used by catalog search, CSV import, and failed-row recovery. See [catalog-and-inventory.md](catalog-and-inventory.md#card-resolution-cascade).
 - **Batched async import** — the CSV worker claims rows with `SELECT … FOR UPDATE SKIP LOCKED`, processes 25 at a time, and self-dispatches the next batch. See [csv-import.md](csv-import.md).
