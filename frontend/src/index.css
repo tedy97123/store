@@ -1,17 +1,22 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: toggled by adding `.dark` on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * Fonts: bundled (self-hosted) via @fontsource — no Google CDN.
- * Lato        = UI sans-serif.
- * Zilla Slab  = free MuseoSlab-style slab substitute for display headings.
- * NOTE: licensed MuseoSlab / Aller can later replace Zilla Slab / Lato —
- * just swap the @fontsource imports below and the --font-* tokens in @theme.
+ * Lato    = UI body sans-serif (approachable, trustworthy — a proven ecommerce
+ *           body face).
+ * Manrope = modern geometric sans for display/headings & card titles — clean
+ *           and highly scannable, a top marketplace/product-card recommendation.
+ * A 2-font system (heading + body) per typography best practice.
  */
 @import "@fontsource/lato/400.css";
 @import "@fontsource/lato/700.css";
 @import "@fontsource/lato/900.css";
-@import "@fontsource/zilla-slab/600.css";
-@import "@fontsource/zilla-slab/700.css";
+@import "@fontsource/manrope/600.css";
+@import "@fontsource/manrope/700.css";
+@import "@fontsource/manrope/800.css";
 
 @theme {
   /* Brand — violet primary accent */
@@ -52,7 +57,49 @@
 
   /* Fonts */
   --font-sans: "Lato", "Aller", system-ui, -apple-system, sans-serif;
-  --font-display: "Zilla Slab", "MuseoSlab", "Lato", serif;
+  --font-display: "Manrope", "Lato", system-ui, sans-serif;
+}
+
+/*
+ * Dark theme — paired semantic tokens (research: near-black bg not pure black,
+ * off-white text not pure white, surfaces elevate lighter, accents shift
+ * lighter/more saturated to keep perceptual weight and 4.5:1 contrast).
+ * Utilities like bg-bg / text-fg reference these vars, so the whole app flips.
+ */
+.dark {
+  color-scheme: dark;
+
+  /* Brand — lifted so links, badges and CTAs stay legible on dark surfaces */
+  --color-brand-50: #1d1a3d;
+  --color-brand-100: #262150;
+  --color-brand-200: #322b6b;
+  --color-brand-300: #6b5cf0;
+  --color-brand-400: #7d6fff;
+  --color-brand-500: #8b7dff;
+  --color-brand-600: #a99cff;
+  --color-brand-700: #c6bfff;
+
+  --color-accent-500: #ff9573;
+
+  /* Neutrals */
+  --color-fg: #e7e9f0;
+  --color-fg-muted: #9aa1b4;
+  --color-bg: #0e1017;
+  --color-surface: #171a22;
+  --color-border: #2a2f3a;
+
+  /* Status — lifted 700s so text-*-700 reads on dark */
+  --color-success-50: #0f2419;
+  --color-success-500: #22c55e;
+  --color-success-700: #4ade80;
+  --color-warning-50: #2a2411;
+  --color-warning-500: #f59e0b;
+  --color-warning-700: #fbbf24;
+  --color-danger-50: #2a1414;
+  --color-danger-500: #f04438;
+  --color-danger-700: #fca5a5;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.45);
 }
 
 body {

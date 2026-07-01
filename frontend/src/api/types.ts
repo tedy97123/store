@@ -10,6 +10,7 @@ export interface Store {
   name: string
   slug: string
   isActive?: boolean
+  featured?: boolean
   spotlightMinPriceCents?: number
   // Storefront branding (owner-managed via /settings)
   primaryColor?: string | null

@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './context/AuthContext'
 import AppLayout from './components/layout/AppLayout'
+import AuthLayout from './components/layout/AuthLayout'
 import AdminLayout from './components/layout/AdminLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 import HomePage from './pages/HomePage'
@@ -23,12 +24,16 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            <Route element={<AppLayout />}>
-              <Route index element={<HomePage />} />
+            {/* Full-screen auth flow (no app navbar) */}
+            <Route element={<AuthLayout />}>
               <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<Navigate to="/register/customer" replace />} />
               <Route path="register/owner" element={<RegisterPage accountType="owner" />} />
               <Route path="register/customer" element={<RegisterPage accountType="customer" />} />
+            </Route>
+
+            <Route element={<AppLayout />}>
+              <Route index element={<HomePage />} />
               <Route path="s/:slug" element={<StorePage />} />
               <Route path="s/:slug/cards/:id" element={<CardDetailsPage />} />
               <Route
