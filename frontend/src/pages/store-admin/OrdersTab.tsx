@@ -1,7 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
 import { ReceiptText } from 'lucide-react'
-import api, { formatPrice, httpStatus, unwrapCollection } from '../../api/client'
-import type { Order } from '../../api/types'
+import { formatPrice, httpStatus } from '../../api/client'
+import { useOrders } from '../../hooks'
 import {
   Card,
   CardHeader,
@@ -19,14 +18,7 @@ import {
 } from '../../components/ui'
 
 export default function OrdersTab({ slug }: { slug: string }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['orders', slug],
-    queryFn: async () => {
-      const { data } = await api.get(`/stores/${slug}/orders`)
-      return unwrapCollection<Order>(data)
-    },
-    retry: false,
-  })
+  const { data, isLoading, error } = useOrders(slug)
 
   // The orders endpoint may not be implemented on the backend yet.
   const status = httpStatus(error)

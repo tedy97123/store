@@ -13,7 +13,7 @@ import {
   Sparkles,
   UserCircle,
 } from 'lucide-react'
-import api, { cardImage, formatScryfallPrice, unwrapCollection } from '../api/client'
+import api, { cardImage, formatScryfallPrice } from '../api/client'
 import type { CardFace, CustomerFavorite, InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -21,11 +21,13 @@ import {
   useCanManageStore,
   useCustomerFavorites,
   useCustomerWantList,
+  useInventory,
   useStore,
   useStoreTheme,
 } from '../hooks'
 import { Badge, Button, buttonVariants, ErrorState, LoadingPanel } from '../components/ui'
 import { FlipCard, InteractiveCard, SpotlightCard } from '../components/cards'
+import { formatDate } from '../lib/format'
 import { FOIL_GRADIENT, rarityAccent, rarityLabel } from '../lib/mtg'
 
 /** Slugify a card name for an EDHREC deck-context link (front face only). */
@@ -43,11 +45,6 @@ function edhrecUrl(name: string): string {
 /** Resolve the best available art URL for a single card face. */
 function faceImage(face: CardFace): string | undefined {
   return face.imageUrl ?? face.imageUris?.normal ?? face.imageUris?.small
-}
-
-function formatDate(value?: string): string {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function legalities(card: InventoryItem['card']) {
@@ -82,14 +79,7 @@ export default function CardDetailsPage() {
   })
 
   // Shared cache key with StorePage — usually warm — powers the recommendations rail.
-  const { data: inventory = [] } = useQuery({
-    queryKey: ['inventory', slug],
-    enabled: Boolean(slug),
-    queryFn: async () => {
-      const { data } = await api.get(`/stores/${slug}/inventory`)
-      return unwrapCollection<InventoryItem>(data)
-    },
-  })
+  const { data: inventory = [] } = useInventory(slug)
 
   const { data: favorites = [] } = useCustomerFavorites(slug, Boolean(user))
   const { data: wantList = [] } = useCustomerWantList(slug, Boolean(user))

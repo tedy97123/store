@@ -40,6 +40,15 @@ export function httpStatus(error: unknown): number | undefined {
   return undefined
 }
 
+/**
+ * Best-effort human-readable message for a failed request: prefer the API's
+ * `detail` field, then the error's own message, then the caller's fallback.
+ */
+export function extractErrorMessage(error: unknown, fallback: string): string {
+  const e = error as { response?: { data?: { detail?: string } }; message?: string } | null
+  return e?.response?.data?.detail ?? e?.message ?? fallback
+}
+
 export default api
 
 export function unwrapCollection<T>(data: T[] | { member?: T[] }): T[] {
@@ -72,6 +81,13 @@ export function formatPrice(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+/** Parse a user-entered dollar amount ("$1,234.56") into cents; null if blank/invalid. */
+export function parsePriceInput(value: string): number | null {
+  if (!value.trim()) return null
+  const parsed = Number(value.replace(/[$,\s]/g, ''))
+  return Number.isNaN(parsed) ? null : Math.round(parsed * 100)
+}
+
 export function parseScryfallPrice(value?: string | null): number | null {
   if (!value) return null
   const parsed = Number(value)
@@ -97,13 +113,6 @@ export function scryfallPriceCents(
 }
 
 export function formatScryfallPrice(
-  card: { prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null } },
-  finish: 'nonfoil' | 'foil' | 'etched' = 'nonfoil',
-): string {
-  return formatMarketPrice(card, finish)
-}
-
-export function formatMarketPrice(
   card: { prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null } },
   finish: 'nonfoil' | 'foil' | 'etched' = 'nonfoil',
 ): string {

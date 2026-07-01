@@ -1,22 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import {
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
+  GalleryHorizontalEnd,
   LayoutGrid,
   List as ListIcon,
+  Package,
   Search,
   SlidersHorizontal,
   Sparkles,
   Store as StoreIcon,
   UserCircle,
+  WalletCards,
   X,
 } from 'lucide-react'
-import api, { formatPrice, scryfallPriceCents, unwrapCollection } from '../api/client'
+import { formatPrice, parsePriceInput, scryfallPriceCents } from '../api/client'
 import type { InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
-import { useCanManageStore, useStore, useStoreTheme } from '../hooks'
+import { useCanManageStore, useInventory, useStore, useStoreTheme } from '../hooks'
 import { Button, buttonVariants, EmptyState, Input, LoadingPanel, Pagination, Select } from '../components/ui'
 import { CardRow, CardTile, SpotlightCard } from '../components/cards'
 import { StoreHero } from '../components/store/StoreHero'
@@ -50,15 +53,20 @@ const SORTS: { value: SortKey; label: string }[] = [
   { value: 'newest', label: 'Newest' },
 ]
 
+// Themed shortcut tiles shown above the spotlight. Entries with a `path` link
+// to a store-relative page; the rest are placeholders until their destinations
+// are built.
+const QUICK_ACTIONS: { label: string; icon: typeof Search; path?: string }[] = [
+  { label: 'Search Cards', icon: Search },
+  { label: 'Case cards', icon: GalleryHorizontalEnd },
+  { label: 'Mass Search', icon: ClipboardList, path: 'mass-search' },
+  { label: 'Deck Builder', icon: Package },
+  { label: 'Sell/Trade', icon: WalletCards },
+]
+
 const DEFAULT_SPOTLIGHT_MIN_PRICE_CENTS = 1000
 const SPOTLIGHT_MAX_ITEMS = 12
 const RESULTS_PAGE_SIZE = 24
-
-function parsePriceInput(value: string): number | null {
-  if (!value.trim()) return null
-  const parsed = Number(value.replace(/[$,\s]/g, ''))
-  return Number.isNaN(parsed) ? null : Math.round(parsed * 100)
-}
 
 function cardColors(item: InventoryItem): string[] {
   const identity = item.card.colorIdentity ?? item.card.colors ?? []
@@ -89,13 +97,7 @@ export default function StorePage() {
   const { data: store } = useStore(slug)
   useStoreTheme(store)
 
-  const { data: inventory = [], isLoading } = useQuery({
-    queryKey: ['inventory', slug],
-    queryFn: async () => {
-      const { data } = await api.get(`/stores/${slug}/inventory`)
-      return unwrapCollection<InventoryItem>(data)
-    },
-  })
+  const { data: inventory = [], isLoading } = useInventory(slug)
 
   const availableSets = useMemo(
     () => Array.from(new Set(inventory.map((item) => item.card.setCode).filter(Boolean))).sort(),
@@ -346,6 +348,34 @@ export default function StorePage() {
         <span className="font-bold text-fg">{totalCards}</span> cards ·{' '}
         <span className="font-bold text-fg">{availableSets.length}</span> sets
       </p>
+
+      {/* Quick actions — themed shortcut tiles over the spotlight */}
+      <section className="space-y-5">
+        <p className="mx-auto max-w-2xl text-center text-sm text-fg-muted sm:text-base">
+          Browse thousands of in-stock singles, build decks, sell or trade your collection.
+        </p>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          {QUICK_ACTIONS.map(({ label, icon: Icon, path }) => {
+            const tileClass =
+              'flex flex-col items-center justify-center gap-3 rounded-card border border-border bg-surface px-4 py-8 text-fg shadow-card transition-colors hover:border-brand-500 hover:bg-bg'
+            const content = (
+              <>
+                <Icon aria-hidden className="size-6 text-fg-muted" />
+                <span className="text-sm font-bold">{label}</span>
+              </>
+            )
+            return path ? (
+              <Link key={label} to={`/s/${slug}/${path}`} className={tileClass}>
+                {content}
+              </Link>
+            ) : (
+              <button key={label} type="button" className={tileClass}>
+                {content}
+              </button>
+            )
+          })}
+        </div>
+      </section>
 
       {/* Spotlight — holographic cards in a lively persistent rail */}
       {spotlightItems.length > 0 && (

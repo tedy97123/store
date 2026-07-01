@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Search } from 'lucide-react'
 import api, { cardImage, formatScryfallPrice } from '../../api/client'
+import { inventoryKey } from '../../hooks'
 import type { CardSummary, CsvImportJob, CsvImportRow } from '../../api/types'
 import {
   Card,
@@ -20,7 +21,7 @@ import {
   Input,
   Modal,
 } from '../../components/ui'
-import { RunStatusBadge, isActive, rowMarketPrice } from './csv-shared'
+import { ImportStat, RunStatusBadge, isActive, rowMarketPrice } from './csv-shared'
 
 const ROW_LIMIT = 100
 
@@ -104,7 +105,7 @@ export default function ImportRunDetailsPage() {
     await queryClient.invalidateQueries({ queryKey: ['csv-import-run', slug, importId] })
     await queryClient.invalidateQueries({ queryKey: ['csv-import-runs', slug] })
     await queryClient.invalidateQueries({ queryKey: ['csv-import-current', slug] })
-    await queryClient.invalidateQueries({ queryKey: ['inventory', slug] })
+    await queryClient.invalidateQueries({ queryKey: inventoryKey(slug) })
     await refetch()
     await refetchFailed()
   }
@@ -138,10 +139,10 @@ export default function ImportRunDetailsPage() {
         {job && (
           <CardBody className="space-y-5">
             <div className="grid gap-3 md:grid-cols-4">
-              <Stat label="Rows" value={String(job.totalRows)} />
-              <Stat label="Processed" value={`${job.processedRows}/${job.totalRows}`} />
-              <Stat label="Imported" value={String(job.importedRows)} tone="success" />
-              <Stat label="Failed" value={String(job.failedRows)} tone="danger" />
+              <ImportStat label="Rows" value={String(job.totalRows)} />
+              <ImportStat label="Processed" value={`${job.processedRows}/${job.totalRows}`} />
+              <ImportStat label="Imported" value={String(job.importedRows)} tone="success" />
+              <ImportStat label="Failed" value={String(job.failedRows)} tone="danger" />
             </div>
 
             <div className="space-y-1.5">
@@ -581,9 +582,9 @@ function BatchRecoveryModal({
     >
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
-          <Stat label="Matched" value={String(resolved.length)} tone="success" />
-          <Stat label="Needs review" value={String(unresolvedCount)} tone={unresolvedCount > 0 ? 'danger' : 'neutral'} />
-          <Stat label="Total" value={String(safeResults.length)} />
+          <ImportStat label="Matched" value={String(resolved.length)} tone="success" />
+          <ImportStat label="Needs review" value={String(unresolvedCount)} tone={unresolvedCount > 0 ? 'danger' : 'neutral'} />
+          <ImportStat label="Total" value={String(safeResults.length)} />
         </div>
 
         {error && (
@@ -649,13 +650,3 @@ function BatchRecoveryModal({
   )
 }
 
-function Stat({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' }) {
-  const valueTone =
-    tone === 'success' ? 'text-success-700' : tone === 'danger' ? 'text-danger-700' : 'text-fg'
-  return (
-    <div className="rounded-card border border-border bg-bg p-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${valueTone}`}>{value}</p>
-    </div>
-  )
-}
