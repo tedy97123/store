@@ -13,6 +13,7 @@ class ScryfallClient
     private const BULK_DATA_URL = 'https://api.scryfall.com/bulk-data';
     private const SEARCH_URL = 'https://api.scryfall.com/cards/search';
     private const CARD_URL = 'https://api.scryfall.com/cards/';
+    private const COLLECTION_URL = 'https://api.scryfall.com/cards/collection';
     private const MIN_REQUEST_INTERVAL_MICROSECONDS = 125000;
 
     private static int $lastRequestAt = 0;
@@ -210,6 +211,72 @@ class ScryfallClient
     }
 
     /**
+     * @param list<array{set: string, collectorNumber: string}> $identifiers
+     *
+     * @return array<string, Card> keyed by "set|collectorNumber"
+     */
+    public function fetchCollectionBySetCollectors(array $identifiers): array
+    {
+        $unique = [];
+        foreach ($identifiers as $identifier) {
+            $set = strtolower(trim($identifier['set']));
+            $collectorNumber = trim($identifier['collectorNumber']);
+            if ('' === $set || '' === $collectorNumber) {
+                continue;
+            }
+
+            $unique[$this->collectionKey($set, $collectorNumber)] = [
+                'set' => $set,
+                'collector_number' => $collectorNumber,
+            ];
+        }
+
+        $matchedIds = [];
+        foreach (array_chunk($unique, 75, true) as $chunk) {
+            $response = $this->requestWithRateLimit('POST', self::COLLECTION_URL, [
+                'headers' => ['User-Agent' => 'MTGStore/1.0'],
+                'json' => ['identifiers' => array_values($chunk)],
+            ]);
+
+            $status = $response->getStatusCode();
+            if ($status < 200 || $status >= 300) {
+                continue;
+            }
+
+            $payload = $response->toArray(false);
+            $data = $payload['data'] ?? null;
+            if (!is_array($data)) {
+                continue;
+            }
+
+            foreach ($data as $cardData) {
+                if (!is_array($cardData) || !isset($cardData['id'])) {
+                    continue;
+                }
+
+                $this->upsertFromScryfallData($cardData);
+                $key = $this->collectionKey(
+                    (string) ($cardData['set'] ?? ''),
+                    (string) ($cardData['collector_number'] ?? ''),
+                );
+                $matchedIds[$key] = Uuid::fromString((string) $cardData['id']);
+            }
+
+            $this->entityManager->flush();
+        }
+
+        $matches = [];
+        foreach ($matchedIds as $key => $id) {
+            $card = $this->cardRepository->find($id);
+            if ($card instanceof Card) {
+                $matches[$key] = $card;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
      * Fetch the full card payload for a single card from Scryfall by its id and
      * persist every field (plus the complete raw payload) locally.
      *
@@ -317,5 +384,10 @@ class ScryfallClient
     private function truncate(string $value, int $maxLength): string
     {
         return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
+    }
+
+    private function collectionKey(string $set, string $collectorNumber): string
+    {
+        return strtolower(trim($set)).'|'.strtolower(trim($collectorNumber));
     }
 }

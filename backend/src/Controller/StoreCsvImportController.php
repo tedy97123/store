@@ -4,11 +4,18 @@ namespace App\Controller;
 
 use App\Entity\CsvImportJob;
 use App\Entity\CsvImportRow;
+use App\Entity\Card;
+use App\Entity\Store;
+use App\Enum\CardCondition;
 use App\Message\ProcessCsvImportMessage;
+use App\Repository\CardRepository;
 use App\Repository\CsvImportJobRepository;
 use App\Repository\CsvImportRowRepository;
 use App\Repository\StoreRepository;
+use App\Service\Catalog\CatalogCardResolver;
 use App\Service\CsvImport\CsvImportParser;
+use App\Service\Inventory\StoreInventoryWriter;
+use App\Service\Scryfall\ScryfallClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -17,6 +24,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Symfony\Component\Uid\Uuid;
 
 #[Route('/api/stores/{slug}/csv-imports')]
 final class StoreCsvImportController extends AbstractController
@@ -34,9 +42,13 @@ final class StoreCsvImportController extends AbstractController
 
     public function __construct(
         private readonly StoreRepository $storeRepository,
+        private readonly CardRepository $cardRepository,
         private readonly CsvImportJobRepository $jobRepository,
         private readonly CsvImportRowRepository $rowRepository,
+        private readonly CatalogCardResolver $catalogCardResolver,
         private readonly CsvImportParser $parser,
+        private readonly StoreInventoryWriter $inventoryWriter,
+        private readonly ScryfallClient $scryfallClient,
         private readonly EntityManagerInterface $entityManager,
         private readonly MessageBusInterface $messageBus,
     ) {
@@ -245,6 +257,205 @@ final class StoreCsvImportController extends AbstractController
         return $this->json($this->serializeJobSummary($job));
     }
 
+    #[Route('/{id}/failed/preview', name: 'api_store_csv_import_failed_preview', methods: ['POST'])]
+    #[IsGranted('ROLE_USER')]
+    public function previewFailedRows(string $slug, int $id): JsonResponse
+    {
+        $job = $this->findManagedJob($slug, $id);
+        if (!$job instanceof CsvImportJob) {
+            return $this->json(['detail' => 'Import job not found.'], 404);
+        }
+
+        if (CsvImportJob::STATUS_QUEUED === $job->getStatus() || $this->isActivelyProcessing($job)) {
+            return $this->json(['detail' => 'Import is already running. Pause or wait for it to finish before resolving failed cards.'], 409);
+        }
+
+        $rows = $this->rowRepository->findBy(
+            ['job' => $job, 'status' => CsvImportRow::STATUS_ERROR],
+            ['rowIndex' => 'ASC'],
+        );
+
+        $collectionMatches = $this->scryfallClient->fetchCollectionBySetCollectors(array_map(
+            static fn (CsvImportRow $row): array => [
+                'set' => $row->getSetCode(),
+                'collectorNumber' => $row->getCollectorNumber(),
+            ],
+            $rows,
+        ));
+
+        $results = [];
+        foreach ($rows as $row) {
+            $resolution = $this->catalogCardResolver->resolveForPreview(
+                $row->getName(),
+                $row->getSetCode(),
+                $row->getCollectorNumber(),
+                $row->getRarity(),
+                $row->isFoil() ? 'foil' : 'nonfoil',
+                false,
+            );
+            $card = $resolution->card;
+            if (!$card instanceof Card) {
+                $collectionMatch = $collectionMatches[$this->collectionMatchKey($row->getSetCode(), $row->getCollectorNumber())] ?? null;
+                if (
+                    $collectionMatch instanceof Card
+                    && $this->catalogCardResolver->matchesFilters(
+                        $collectionMatch,
+                        $row->getSetCode(),
+                        $row->getCollectorNumber(),
+                        $row->getRarity(),
+                        $row->isFoil() ? 'foil' : 'nonfoil',
+                    )
+                ) {
+                    $card = $collectionMatch;
+                }
+            }
+
+            $result = ['row' => $this->serializeRow($row)];
+            if ($card instanceof Card) {
+                $result['card'] = $this->catalogCardResolver->serializeCard($card);
+            } else {
+                $result['error'] = 'No matching local or Scryfall set/collector printing found.';
+            }
+            $results[] = $result;
+        }
+
+        return $this->json(['results' => $results]);
+    }
+
+    #[Route('/{id}/failed/manual-import', name: 'api_store_csv_import_failed_manual_import', methods: ['POST'])]
+    #[IsGranted('ROLE_USER')]
+    public function manualImportFailedRows(Request $request, string $slug, int $id): JsonResponse
+    {
+        $job = $this->findManagedJob($slug, $id);
+        if (!$job instanceof CsvImportJob) {
+            return $this->json(['detail' => 'Import job not found.'], 404);
+        }
+
+        if (CsvImportJob::STATUS_QUEUED === $job->getStatus() || $this->isActivelyProcessing($job)) {
+            return $this->json(['detail' => 'Import is already running. Pause or wait for it to finish before resolving failed cards.'], 409);
+        }
+
+        $store = $job->getStore();
+        if (null === $store) {
+            return $this->json(['detail' => 'Store not found for this import job.'], 409);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload) || !is_array($payload['items'] ?? null)) {
+            return $this->json(['detail' => 'Request body must include an items array.'], 400);
+        }
+
+        $selected = [];
+        $errors = [];
+        foreach ($payload['items'] as $index => $item) {
+            if (!is_array($item)) {
+                $errors[] = ['index' => $index, 'detail' => 'Item must be an object.'];
+                continue;
+            }
+
+            $rowIndex = (int) ($item['rowIndex'] ?? -1);
+            $row = $this->rowRepository->findOneBy(['job' => $job, 'rowIndex' => $rowIndex]);
+            if (!$row instanceof CsvImportRow || CsvImportRow::STATUS_ERROR !== $row->getStatus()) {
+                $errors[] = ['rowIndex' => $rowIndex, 'detail' => 'Failed import row was not found.'];
+                continue;
+            }
+
+            $cardId = (string) ($item['cardId'] ?? '');
+            try {
+                $card = '' !== $cardId ? $this->cardRepository->find(Uuid::fromString($cardId)) : null;
+            } catch (\InvalidArgumentException) {
+                $errors[] = ['rowIndex' => $rowIndex, 'detail' => 'Card id is invalid.'];
+                continue;
+            }
+
+            if (!$card instanceof Card) {
+                $errors[] = ['rowIndex' => $rowIndex, 'detail' => 'Selected card was not found.'];
+                continue;
+            }
+
+            $selected[] = [$row, $card];
+        }
+
+        if ([] !== $errors) {
+            return $this->json(['detail' => 'Some failed rows could not be resolved.', 'errors' => $errors], 422);
+        }
+
+        if ([] === $selected) {
+            return $this->json(['detail' => 'No resolved failed rows were selected.'], 422);
+        }
+
+        $written = [];
+        foreach ($selected as [$row, $card]) {
+            $written[] = [$row, $this->importRowIntoInventory($job, $store, $row, $card)];
+        }
+
+        $this->entityManager->flush();
+        foreach ($written as [$row, $item]) {
+            if (null !== $item->getId()) {
+                $row->setImportedItemId($item->getId());
+            }
+        }
+        $this->syncJobCounters($job);
+        $this->entityManager->flush();
+
+        return $this->json($this->serializeJob($job, $request));
+    }
+
+    #[Route('/{id}/rows/{rowIndex}/manual-import', name: 'api_store_csv_import_manual_import_row', methods: ['POST'])]
+    #[IsGranted('ROLE_USER')]
+    public function manualImportRow(Request $request, string $slug, int $id, int $rowIndex): JsonResponse
+    {
+        $job = $this->findManagedJob($slug, $id);
+        if (!$job instanceof CsvImportJob) {
+            return $this->json(['detail' => 'Import job not found.'], 404);
+        }
+
+        $row = $this->rowRepository->findOneBy(['job' => $job, 'rowIndex' => $rowIndex]);
+        if (!$row instanceof CsvImportRow) {
+            return $this->json(['detail' => 'Import row not found.'], 404);
+        }
+
+        if (CsvImportRow::STATUS_ERROR !== $row->getStatus()) {
+            return $this->json(['detail' => 'Only failed rows can be manually imported.'], 409);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload)) {
+            return $this->json(['detail' => 'Request body must be JSON.'], 400);
+        }
+
+        $cardId = (string) ($payload['cardId'] ?? '');
+        try {
+            $card = '' !== $cardId ? $this->cardRepository->find(Uuid::fromString($cardId)) : null;
+        } catch (\InvalidArgumentException) {
+            return $this->json(['detail' => 'Card id is invalid.'], 422);
+        }
+
+        if (null === $card) {
+            return $this->json(['detail' => 'Selected card was not found.'], 404);
+        }
+
+        $store = $job->getStore();
+        if (null === $store) {
+            return $this->json(['detail' => 'Store not found for this import job.'], 409);
+        }
+
+        $item = $this->importRowIntoInventory($job, $store, $row, $card, [
+            'condition' => $payload['condition'] ?? null,
+            'quantity' => $payload['quantity'] ?? null,
+            'isFoil' => $payload['isFoil'] ?? null,
+        ]);
+
+        $this->entityManager->flush();
+        if (null !== $item->getId()) {
+            $row->setImportedItemId($item->getId());
+        }
+        $this->syncJobCounters($job);
+        $this->entityManager->flush();
+
+        return $this->json($this->serializeJob($job, $request));
+    }
+
     #[Route('/{id}/cancel', name: 'api_store_csv_import_cancel', methods: ['POST'])]
     #[IsGranted('ROLE_USER')]
     public function cancel(string $slug, int $id): JsonResponse
@@ -332,6 +543,58 @@ final class StoreCsvImportController extends AbstractController
         $this->messageBus->dispatch(new ProcessCsvImportMessage((int) $job->getId()));
     }
 
+    private function syncJobCounters(CsvImportJob $job): void
+    {
+        $counts = $this->rowRepository->countByStatus($job);
+        $job->setImportedRows($counts['imported']);
+        $job->setFailedRows($counts['error']);
+        $job->setProcessedRows($counts['imported'] + $counts['error']);
+
+        if (
+            CsvImportJob::STATUS_CANCELLED !== $job->getStatus()
+            && 0 === $counts['queued']
+            && 0 === $counts['processing']
+            && 0 === $counts['error']
+        ) {
+            $job->setStatus(CsvImportJob::STATUS_COMPLETED);
+            $job->setErrorMessage(null);
+            $job->setFinishedAt(new \DateTimeImmutable());
+        }
+    }
+
+    /**
+     * @param array{condition?: mixed, quantity?: mixed, isFoil?: mixed} $overrides
+     */
+    private function importRowIntoInventory(
+        CsvImportJob $job,
+        Store $store,
+        CsvImportRow $row,
+        Card $card,
+        array $overrides = [],
+    ): \App\Entity\InventoryItem {
+        $condition = CardCondition::tryFrom((string) ($overrides['condition'] ?? $row->getCondition())) ?? CardCondition::NM;
+        $quantity = max(0, (int) ($overrides['quantity'] ?? $row->getQuantity()));
+        $isFoil = array_key_exists('isFoil', $overrides) && null !== $overrides['isFoil'] ? (bool) $overrides['isFoil'] : $row->isFoil();
+        $notes = implode("\n", array_values(array_filter([
+            'Manually recovered from CSV import row #'.($row->getRowIndex() + 1).' in import #'.$job->getId(),
+            '' !== $row->getGame() ? 'Game: '.$row->getGame() : '',
+            '' !== $row->getVariant() ? 'Variant: '.$row->getVariant() : '',
+        ])));
+
+        $item = $this->inventoryWriter->write($store, $card, $quantity, $condition, $isFoil, $notes, false);
+
+        $row
+            ->setStatus(CsvImportRow::STATUS_IMPORTED)
+            ->setCard($this->catalogCardResolver->serializeCard($card))
+            ->setError(null);
+
+        if (null !== $item->getId()) {
+            $row->setImportedItemId($item->getId());
+        }
+
+        return $item;
+    }
+
     private function serializeJob(CsvImportJob $job, Request $request): array
     {
         $rowStatus = (string) $request->query->get('rowStatus', '');
@@ -399,6 +662,11 @@ final class StoreCsvImportController extends AbstractController
     private function truncate(string $value, int $maxLength): string
     {
         return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
+    }
+
+    private function collectionMatchKey(string $set, string $collectorNumber): string
+    {
+        return strtolower(trim($set)).'|'.strtolower(trim($collectorNumber));
     }
 
     /** @return array<string, mixed> */

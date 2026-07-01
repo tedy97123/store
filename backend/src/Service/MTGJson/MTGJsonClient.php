@@ -8,6 +8,14 @@ class MTGJsonClient
 {
     private const SET_URL = 'https://mtgjson.com/api/v5/';
     private const MAX_CACHED_SETS = 4;
+    private const MAX_SET_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+    /** @var list<string> */
+    private const SKIP_SET_CODES = [
+        // The List is very large and can exceed PHP's 128 MB memory limit when
+        // decoded as one MTGJSON set payload. Scryfall search handles it safely.
+        'PLST',
+    ];
 
     /** @var array<string, list<array{name: string, number: string, rarity: string, finishes: list<string>, identifiers: array<string, mixed>}>> */
     private array $setCache = [];
@@ -24,6 +32,12 @@ class MTGJsonClient
             return [];
         }
 
+        if (in_array($normalizedSet, self::SKIP_SET_CODES, true)) {
+            $this->setCache[$normalizedSet] = [];
+
+            return [];
+        }
+
         if (isset($this->setCache[$normalizedSet])) {
             return $this->setCache[$normalizedSet];
         }
@@ -33,6 +47,13 @@ class MTGJsonClient
         ]);
 
         if (200 !== $response->getStatusCode()) {
+            $this->setCache[$normalizedSet] = [];
+
+            return [];
+        }
+
+        $contentLength = (int) ($response->getHeaders(false)['content-length'][0] ?? 0);
+        if ($contentLength > self::MAX_SET_RESPONSE_BYTES) {
             $this->setCache[$normalizedSet] = [];
 
             return [];

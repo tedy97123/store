@@ -157,12 +157,14 @@ Shared by catalog search and CSV import. `CatalogCardResolver::resolve(name, set
 flowchart TD
     start["resolve(name, set, collector#, rarity, finish)"] --> local["1. matchLocalCard()<br/>CardRepository::searchByName + matchesFilters"]
     local -->|hit| done([✅ CatalogResolutionResult.card])
-    local -->|miss| mtg["2. matchMtgJsonCard()<br/>MTGJsonClient::getSetCards()"]
-    mtg -->|hit| done
-    mtg -->|miss| scry["3. resolveViaScryfallSearch()<br/>ScryfallClient::searchRemoteAndUpsert()"]
+    local -->|miss| scry["2. resolveViaScryfallSearch()<br/>ScryfallClient::searchRemoteAndUpsert()"]
     scry -->|hit| done
-    scry -->|miss| err([⛔ result.error])
+    scry -->|miss| mtg["3. matchMtgJsonCard()<br/>MTGJsonClient::getSetCards()"]
+    mtg -->|hit| done
+    mtg -->|miss| err([⛔ result.error])
 ```
+
+Scryfall is attempted before MTGJSON so normal failed-row recovery and CSV retry paths avoid downloading large set files when the exact printing can be found by Scryfall search. MTGJSON remains the final fallback, and oversized/problematic set payloads are skipped to keep the worker within memory limits.
 
 | Layer | Where |
 |-------|-------|

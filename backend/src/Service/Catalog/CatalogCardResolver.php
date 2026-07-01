@@ -30,27 +30,47 @@ final readonly class CatalogCardResolver
             return new CatalogResolutionResult($localCard);
         }
 
+        $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
+        if ($fallbackCard instanceof Card) {
+            return new CatalogResolutionResult($fallbackCard);
+        }
+
         try {
             $mtgJsonCard = $this->matchMtgJsonCard($name, $setCode, $collectorNumber, $rarity, $finish);
         } catch (\Throwable $e) {
-            $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
-            if ($fallbackCard instanceof Card) {
-                return new CatalogResolutionResult($fallbackCard);
-            }
-
             return new CatalogResolutionResult(null, 'MTGJSON lookup failed and Scryfall fallback found no match: '.$e->getMessage());
         }
 
         if (null === $mtgJsonCard) {
-            $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
-            if ($fallbackCard instanceof Card) {
-                return new CatalogResolutionResult($fallbackCard);
-            }
-
             return new CatalogResolutionResult(null, 'No matching MTGJSON or Scryfall printing found.');
         }
 
         return $this->resolveByMtgJsonScryfallId($mtgJsonCard);
+    }
+
+    public function resolveForPreview(
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+        bool $allowRemoteSearch,
+    ): CatalogResolutionResult {
+        $localCard = $this->matchLocalCard($name, $setCode, $collectorNumber, $rarity, $finish);
+        if ($localCard instanceof Card) {
+            return new CatalogResolutionResult($localCard);
+        }
+
+        if (!$allowRemoteSearch) {
+            return new CatalogResolutionResult(null, 'Not previewed yet. Resolve this row individually or retry after finalizing the current matches.');
+        }
+
+        $fallbackCard = $this->resolveViaScryfallSearch($name, $setCode, $collectorNumber, $rarity, $finish);
+        if ($fallbackCard instanceof Card) {
+            return new CatalogResolutionResult($fallbackCard);
+        }
+
+        return new CatalogResolutionResult(null, 'No matching local or Scryfall printing found.');
     }
 
     /**
@@ -139,7 +159,7 @@ final readonly class CatalogCardResolver
             return false;
         }
 
-        if ('' !== $rarity && strtolower((string) $card->getRarity()) !== strtolower($rarity)) {
+        if ('' !== $rarity && $this->normalizeRarity((string) $card->getRarity()) !== $this->normalizeRarity($rarity)) {
             return false;
         }
 
@@ -164,12 +184,12 @@ final readonly class CatalogCardResolver
         $cards = $this->mtgJsonClient->getSetCards($setCode);
         $normalizedName = $this->normalizeMatchValue($name);
         $normalizedCollectorNumber = $this->normalizeMatchValue($collectorNumber);
-        $normalizedRarity = $this->normalizeMatchValue($rarity);
+        $normalizedRarity = $this->normalizeRarity($rarity);
 
         foreach ($cards as $card) {
             $cardName = $this->normalizeMatchValue((string) ($card['name'] ?? ''));
             $cardNumber = $this->normalizeMatchValue((string) ($card['number'] ?? ''));
-            $cardRarity = $this->normalizeMatchValue((string) ($card['rarity'] ?? ''));
+            $cardRarity = $this->normalizeRarity((string) ($card['rarity'] ?? ''));
             $cardFinishes = isset($card['finishes']) && is_array($card['finishes']) ? $card['finishes'] : [];
 
             if ($cardName !== $normalizedName) {
@@ -194,6 +214,16 @@ final readonly class CatalogCardResolver
     private function normalizeMatchValue(string $value): string
     {
         return strtolower(trim($value));
+    }
+
+    private function normalizeRarity(string $value): string
+    {
+        $normalized = $this->normalizeMatchValue($value);
+
+        return match ($normalized) {
+            'mythic rare' => 'mythic',
+            default => $normalized,
+        };
     }
 
     private function resolveViaScryfallSearch(
