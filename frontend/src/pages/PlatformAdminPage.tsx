@@ -25,6 +25,7 @@ import {
 import {
   CheckCircle2,
   RefreshCw,
+  Star,
   Store as StoreIcon,
   Users as UsersIcon,
 } from 'lucide-react'
@@ -72,6 +73,25 @@ export default function PlatformAdminPage() {
       setStoreName('')
       setStoreSlug('')
       setOwnerId('')
+    },
+  })
+
+  // Featured is a single hero spotlight on the marketplace home: mark one store,
+  // which clears any other. Empty → the home hides the featured section.
+  const setFeatured = useMutation({
+    mutationFn: async ({ id, featured }: { id: number; featured: boolean }) => {
+      if (featured) {
+        await Promise.all(
+          stores
+            .filter((s) => s.featured && s.id !== id)
+            .map((s) => api.patch(`/admin/stores/${s.id}`, { featured: false })),
+        )
+      }
+      await api.patch(`/admin/stores/${id}`, { featured })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin-stores'] })
+      await queryClient.invalidateQueries({ queryKey: ['stores'] })
     },
   })
 
@@ -244,6 +264,7 @@ export default function PlatformAdminPage() {
                 <TH>Store</TH>
                 <TH>Slug</TH>
                 <TH>Status</TH>
+                <TH>Featured</TH>
                 <TH className="text-right">Actions</TH>
               </TR>
             </THead>
@@ -258,6 +279,18 @@ export default function PlatformAdminPage() {
                     ) : (
                       <Badge tone="success">Active</Badge>
                     )}
+                  </TD>
+                  <TD>
+                    <Button
+                      variant={store.featured ? 'primary' : 'secondary'}
+                      size="sm"
+                      loading={setFeatured.isPending && setFeatured.variables?.id === store.id}
+                      onClick={() => setFeatured.mutate({ id: store.id, featured: !store.featured })}
+                      aria-pressed={Boolean(store.featured)}
+                    >
+                      <Star aria-hidden className={`size-4 ${store.featured ? 'fill-current' : ''}`} />
+                      {store.featured ? 'Featured' : 'Feature'}
+                    </Button>
                   </TD>
                   <TD className="text-right">
                     <Link

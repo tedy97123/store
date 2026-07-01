@@ -1,5 +1,7 @@
 export { useStore } from './useStore'
 export { useCanManageStore } from './useCanManageStore'
 export { useDebouncedValue } from './useDebouncedValue'
+export { useTheme } from './useTheme'
+export type { Theme } from './useTheme'
 export { useStoreTheme } from './useStoreTheme'
 export { customerKeys, useCustomerProfile, useCustomerFavorites, useCustomerWantList } from './useCustomer'

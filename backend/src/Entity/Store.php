@@ -87,6 +87,11 @@ class Store
     #[Groups(['store:read', 'store:admin', 'store:admin_write'])]
     private bool $isActive = true;
 
+    /** Marketplace hero spotlight — chosen by a platform admin. */
+    #[ORM\Column(options: ['default' => false])]
+    #[Groups(['store:read', 'store:admin', 'store:admin_write'])]
+    private bool $featured = false;
+
     #[ORM\Column(options: ['default' => 1000])]
     #[Assert\PositiveOrZero]
     #[Groups(['store:read', 'store:admin', 'store:admin_write'])]
@@ -212,6 +217,18 @@ class Store
     public function setIsActive(bool $isActive): static
     {
         $this->isActive = $isActive;
+
+        return $this;
+    }
+
+    public function isFeatured(): bool
+    {
+        return $this->featured;
+    }
+
+    public function setFeatured(bool $featured): static
+    {
+        $this->featured = $featured;
 
         return $this;
     }

@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useMatch } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useMatch } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useTheme } from '../../hooks'
 import { Avatar, Button, buttonVariants } from '../ui'
-import { ChevronDown, LogIn, LogOut, Store, UserCircle, UserPlus } from 'lucide-react'
+import { ChevronDown, LogIn, LogOut, Menu, Moon, Store, Sun, UserCircle, UserPlus, X } from 'lucide-react'
 
 export default function AppLayout() {
   const { user, logout, isSuperAdmin } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const ownedStores = user?.ownedStores ?? []
   // The customer profile is per-store, so only surface an "Account" link when the
   // current route is within a store (e.g. /s/:slug, /s/:slug/cards/:id).
   const storeMatch = useMatch('/s/:slug/*')
   const storeSlug = storeMatch?.params.slug
+  const location = useLocation()
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [storeMenuOpen, setStoreMenuOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const storeMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -30,30 +34,52 @@ export default function AppLayout() {
     return () => document.removeEventListener('mousedown', handlePointerDown)
   }, [])
 
+  // Close the mobile menu whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [location.pathname])
+
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     isActive
-      ? 'text-sm font-semibold text-brand-600'
-      : 'text-sm font-medium text-fg-muted hover:text-brand-600'
+      ? 'rounded-full bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700'
+      : 'rounded-full px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:bg-bg hover:text-brand-600'
+
+  const mobileLinkClass = 'block rounded-btn px-3 py-2.5 text-base font-medium text-fg hover:bg-bg'
+  const closeMobile = () => setMobileOpen(false)
+
+  const themeToggle = (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+      className="grid size-9 place-items-center rounded-btn border border-border bg-surface text-fg-muted transition-colors hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+    >
+      {theme === 'dark' ? <Sun aria-hidden className="size-4" /> : <Moon aria-hidden className="size-4" />}
+    </button>
+  )
 
   return (
     <div className="min-h-screen bg-bg text-fg">
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4">
-          <Link to="/" className="flex items-center gap-2 font-display text-lg font-bold tracking-tight text-brand-600">
-            <span className="grid size-9 place-items-center rounded-btn bg-brand-500 text-sm font-bold text-white">
+      <header className="sticky top-0 z-40 border-b border-border bg-surface/80 shadow-sm backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
+          <Link to="/" className="flex items-center gap-2 font-display text-lg font-bold tracking-tight text-fg">
+            <span className="grid size-9 place-items-center rounded-btn bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-sm">
               MTG
             </span>
-            <span>MTG Marketplace</span>
+            <span className="hidden sm:inline">MTG Marketplace</span>
           </Link>
 
-          <nav className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
+          {/* Desktop navigation */}
+          <nav className="hidden items-center gap-3 md:flex">
             <NavLink to="/" className={navLinkClass} end>
               Stores
             </NavLink>
 
             {isSuperAdmin && (
               <Link to="/platform/admin" className={buttonVariants({ variant: 'secondary', size: 'sm' })}>
-                Platform admin
+                Admin
               </Link>
             )}
 
@@ -63,7 +89,7 @@ export default function AppLayout() {
                 className={buttonVariants({ variant: 'primary', size: 'sm' })}
               >
                 <Store aria-hidden className="size-4" />
-                Manage store
+                My store
               </Link>
             )}
 
@@ -77,7 +103,7 @@ export default function AppLayout() {
                   aria-expanded={storeMenuOpen}
                 >
                   <Store aria-hidden className="size-4" />
-                  Manage stores
+                  My stores
                   <ChevronDown aria-hidden className="size-4" />
                 </Button>
                 {storeMenuOpen && (
@@ -110,7 +136,7 @@ export default function AppLayout() {
                 )}
                 <span className="flex items-center gap-2 text-sm text-fg-muted">
                   <Avatar name={user.displayName} size="sm" />
-                  <span className="hidden sm:inline">{user.displayName}</span>
+                  <span className="hidden lg:inline">{user.displayName}</span>
                 </span>
                 <Button variant="secondary" size="sm" onClick={logout}>
                   <LogOut aria-hidden className="size-4" />
@@ -132,7 +158,7 @@ export default function AppLayout() {
                     aria-expanded={accountMenuOpen}
                   >
                     <UserPlus aria-hidden className="size-4" />
-                    Create account
+                    Sign up
                     <ChevronDown aria-hidden className="size-4" />
                   </Button>
                   {accountMenuOpen && (
@@ -157,7 +183,89 @@ export default function AppLayout() {
               </>
             )}
           </nav>
+
+          {/* Theme toggle (desktop) */}
+          <div className="hidden md:block">{themeToggle}</div>
+
+          {/* Theme toggle + hamburger (mobile) */}
+          <div className="flex items-center gap-2 md:hidden">
+            {themeToggle}
+            <button
+              type="button"
+              onClick={() => setMobileOpen((v) => !v)}
+              aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-nav"
+              className="grid size-9 place-items-center rounded-btn border border-border bg-surface text-fg-muted transition-colors hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              {mobileOpen ? <X aria-hidden className="size-5" /> : <Menu aria-hidden className="size-5" />}
+            </button>
+          </div>
+          </div>
         </div>
+
+        {/* Mobile navigation panel */}
+        {mobileOpen && (
+          <nav id="mobile-nav" className="border-t border-border bg-surface px-4 py-3 md:hidden">
+            <div className="mx-auto max-w-7xl space-y-1">
+              {user && (
+                <div className="flex items-center gap-2 px-3 py-2 text-sm text-fg-muted">
+                  <Avatar name={user.displayName} size="sm" />
+                  <span className="truncate">{user.displayName}</span>
+                </div>
+              )}
+
+              <NavLink to="/" end onClick={closeMobile} className={mobileLinkClass}>
+                Stores
+              </NavLink>
+
+              {isSuperAdmin && (
+                <Link to="/platform/admin" onClick={closeMobile} className={mobileLinkClass}>
+                  Admin
+                </Link>
+              )}
+
+              {ownedStores.map((store) => (
+                <Link key={store.id} to={`/s/${store.slug}/admin`} onClick={closeMobile} className={mobileLinkClass}>
+                  {ownedStores.length === 1 ? 'My store' : `Manage ${store.name}`}
+                </Link>
+              ))}
+
+              {user && storeSlug && (
+                <Link to={`/s/${storeSlug}/account`} onClick={closeMobile} className={mobileLinkClass}>
+                  Account
+                </Link>
+              )}
+
+              <div className="mt-2 border-t border-border pt-2">
+                {user ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeMobile()
+                      logout()
+                    }}
+                    className={`${mobileLinkClass} w-full text-left`}
+                  >
+                    Logout
+                  </button>
+                ) : (
+                  <>
+                    <Link to="/login" onClick={closeMobile} className={mobileLinkClass}>
+                      Sign in
+                    </Link>
+                    <Link to="/register/customer" onClick={closeMobile} className={mobileLinkClass}>
+                      Create customer account
+                    </Link>
+                    <Link to="/register/owner" onClick={closeMobile} className={mobileLinkClass}>
+                      Create owner account
+                    </Link>
+                  </>
+                )}
+              </div>
+            </div>
+          </nav>
+        )}
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8">

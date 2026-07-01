@@ -1,10 +1,11 @@
-import { forwardRef, useId } from 'react'
+import { forwardRef, useId, useState } from 'react'
 import type {
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { cx } from '../../lib/cx'
 
 const fieldShell = 'flex flex-col gap-1.5'
@@ -53,12 +54,15 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, error, hint, className, id, required, ...props },
+  { label, error, hint, className, id, required, type, ...props },
   ref,
 ) {
   const generatedId = useId()
   const inputId = id ?? generatedId
   const descId = error || hint ? `${inputId}-desc` : undefined
+  const [revealed, setRevealed] = useState(false)
+  const isPassword = type === 'password'
+  const resolvedType = isPassword && revealed ? 'text' : type
   return (
     <div className={fieldShell}>
       {label != null && (
@@ -66,15 +70,30 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           {label}
         </Label>
       )}
-      <input
-        ref={ref}
-        id={inputId}
-        required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={descId}
-        className={cx(controlBase, controlBorder(!!error), 'h-10 px-3 text-sm', className)}
-        {...props}
-      />
+      <div className="relative">
+        <input
+          ref={ref}
+          id={inputId}
+          type={resolvedType}
+          required={required}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={descId}
+          className={cx(controlBase, controlBorder(!!error), 'h-10 px-3 text-sm', isPassword && 'pr-10', className)}
+          {...props}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setRevealed((v) => !v)}
+            aria-label={revealed ? 'Hide password' : 'Show password'}
+            aria-pressed={revealed}
+            tabIndex={-1}
+            className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-btn text-fg-muted transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            {revealed ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
+          </button>
+        )}
+      </div>
       <Caption id={descId} error={error} hint={hint} />
     </div>
   )
