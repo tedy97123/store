@@ -532,6 +532,62 @@ class Card
     #[Groups(['card:read', 'inventory:read'])]
     public function getImageUrl(): ?string
     {
-        return $this->imageUris['normal'] ?? $this->imageUris['small'] ?? null;
+        $topLevel = $this->imageUris['normal'] ?? $this->imageUris['small'] ?? null;
+        if (null !== $topLevel) {
+            return $topLevel;
+        }
+
+        // Double-faced cards (transform, modal_dfc, flip, …) carry no top-level
+        // image_uris; the art lives on each face. Fall back to the front face so
+        // these cards still render a thumbnail everywhere.
+        foreach ($this->getCardFaces() as $face) {
+            if (isset($face['imageUrl']) && '' !== $face['imageUrl']) {
+                return $face['imageUrl'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalized per-face data for multi-faced cards (transform, modal_dfc, flip,
+     * double_faced_token, reversible_card, …). Derived from the raw Scryfall
+     * payload's `card_faces`; an empty list for ordinary single-faced cards.
+     *
+     * @return list<array<string, mixed>>
+     */
+    #[Groups(['card:read', 'inventory:read'])]
+    public function getCardFaces(): array
+    {
+        $faces = $this->scryfallData['card_faces'] ?? null;
+        if (!is_array($faces)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($faces as $face) {
+            if (!is_array($face)) {
+                continue;
+            }
+
+            $imageUris = isset($face['image_uris']) && is_array($face['image_uris']) ? $face['image_uris'] : null;
+
+            $result[] = [
+                'name' => isset($face['name']) ? (string) $face['name'] : null,
+                'imageUris' => $imageUris,
+                'imageUrl' => $imageUris['normal'] ?? $imageUris['small'] ?? null,
+                'manaCost' => isset($face['mana_cost']) ? (string) $face['mana_cost'] : null,
+                'typeLine' => isset($face['type_line']) ? (string) $face['type_line'] : null,
+                'oracleText' => isset($face['oracle_text']) ? (string) $face['oracle_text'] : null,
+                'power' => isset($face['power']) ? (string) $face['power'] : null,
+                'toughness' => isset($face['toughness']) ? (string) $face['toughness'] : null,
+                'loyalty' => isset($face['loyalty']) ? (string) $face['loyalty'] : null,
+                'flavorText' => isset($face['flavor_text']) ? (string) $face['flavor_text'] : null,
+                'artist' => isset($face['artist']) ? (string) $face['artist'] : null,
+                'colors' => isset($face['colors']) && is_array($face['colors']) ? array_values($face['colors']) : null,
+            ];
+        }
+
+        return $result;
     }
 }

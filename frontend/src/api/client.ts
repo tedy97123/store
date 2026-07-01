@@ -52,8 +52,20 @@ export function unwrapCollection<T>(data: T[] | { member?: T[] }): T[] {
   return []
 }
 
-export function cardImage(card: { imageUrl?: string; imageUris?: { normal?: string; small?: string } }): string | undefined {
-  return card.imageUrl ?? card.imageUris?.normal ?? card.imageUris?.small
+export function cardImage(card: {
+  imageUrl?: string
+  imageUris?: { normal?: string; small?: string }
+  cardFaces?: { imageUrl?: string; imageUris?: { normal?: string; small?: string } }[]
+}): string | undefined {
+  const front = card.cardFaces?.[0]
+  return (
+    card.imageUrl ??
+    card.imageUris?.normal ??
+    card.imageUris?.small ??
+    front?.imageUrl ??
+    front?.imageUris?.normal ??
+    front?.imageUris?.small
+  )
 }
 
 export function formatPrice(cents: number): string {

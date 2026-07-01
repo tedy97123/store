@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -5,13 +6,15 @@ import {
   ExternalLink,
   Heart,
   ListPlus,
+  RefreshCw,
+  RotateCw,
   Settings,
   ShoppingCart,
   Sparkles,
   UserCircle,
 } from 'lucide-react'
 import api, { cardImage, formatScryfallPrice, unwrapCollection } from '../api/client'
-import type { CustomerFavorite, InventoryItem } from '../api/types'
+import type { CardFace, CustomerFavorite, InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
 import {
   customerKeys,
@@ -22,7 +25,7 @@ import {
   useStoreTheme,
 } from '../hooks'
 import { Badge, Button, buttonVariants, ErrorState, LoadingPanel } from '../components/ui'
-import { InteractiveCard, SpotlightCard } from '../components/cards'
+import { FlipCard, InteractiveCard, SpotlightCard } from '../components/cards'
 import { FOIL_GRADIENT, rarityAccent, rarityLabel } from '../lib/mtg'
 
 /** Slugify a card name for an EDHREC deck-context link (front face only). */
@@ -35,6 +38,11 @@ function edhrecUrl(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
   return `https://edhrec.com/cards/${slug}`
+}
+
+/** Resolve the best available art URL for a single card face. */
+function faceImage(face: CardFace): string | undefined {
+  return face.imageUrl ?? face.imageUris?.normal ?? face.imageUris?.small
 }
 
 function formatDate(value?: string): string {
@@ -53,6 +61,9 @@ export default function CardDetailsPage() {
   const { user } = useAuth()
   const canManage = useCanManageStore(slug)
   const queryClient = useQueryClient()
+
+  // Which face of a multi-faced card is currently shown (0 = front).
+  const [faceIndex, setFaceIndex] = useState(0)
 
   const { data: store } = useStore(slug)
   useStoreTheme(store)
@@ -149,7 +160,26 @@ export default function CardDetailsPage() {
 
   const card = item.card
   const finish = item.isFoil ? 'foil' : 'nonfoil'
-  const image = cardImage(card)
+
+  // Multi-faced cards carry per-face art and text, but they come in two flavors:
+  //  • Two-sided (transform / modal_dfc / …): each face has its own art, so the
+  //    card physically turns over — flip front ↔ back.
+  //  • Rotate (flip = 180°, split/aftermath = 90°): the two faces share a single
+  //    image and you physically rotate the card in-plane to read the other side.
+  const faces = card.cardFaces ?? []
+  const twoSided = faces.filter((face) => faceImage(face)).length >= 2
+  const ROTATE_LAYOUTS: Record<string, number> = { flip: 180, split: 90 }
+  const rotateDeg = card.layout ? ROTATE_LAYOUTS[card.layout] : undefined
+  const rotatable = !twoSided && rotateDeg !== undefined && faces.length >= 2
+  const multiFace = twoSided || rotatable
+  const flipped = multiFace ? faceIndex % 2 === 1 : false
+  const activeFace = faces.length >= 2 ? faces[faceIndex % faces.length] : undefined
+  const nextFace = faces.length >= 2 ? faces[(faceIndex + 1) % faces.length] : undefined
+
+  const image = (activeFace ? faceImage(activeFace) : undefined) ?? cardImage(card)
+  const oracleText = activeFace?.oracleText ?? card.oracleText
+  const flavorText = activeFace?.flavorText ?? card.flavorText
+  const typeLine = activeFace?.typeLine ?? card.typeLine
   const accent = rarityAccent(card.rarity)
   const legalFormats = legalities(card)
   const isFavorite = favorites.some((favorite) => favorite.inventoryItem?.id === item.id)
@@ -219,7 +249,7 @@ export default function CardDetailsPage() {
               {(card.setCode ?? '—').toUpperCase()} · #{card.collectorNumber ?? '—'}
             </p>
             <h1 className="mt-1 max-w-3xl font-display text-4xl font-bold tracking-tight text-fg sm:text-5xl">{card.name}</h1>
-            {card.typeLine && <p className="mt-2 text-lg text-fg-muted">{card.typeLine}</p>}
+            {typeLine && <p className="mt-2 text-lg text-fg-muted">{typeLine}</p>}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               {card.rarity && (
                 <span
@@ -247,8 +277,38 @@ export default function CardDetailsPage() {
       <div className="grid gap-8 lg:grid-cols-[22rem_minmax(0,1fr)]">
         {/* LEFT: image + sticky buy box */}
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <InteractiveCard image={image} alt={card.name} foil={item.isFoil} accent={accent} />
-          <p className="text-center text-xs text-fg-muted">Move your cursor over the card{item.isFoil ? ' to see the foil shine' : ''}.</p>
+          {multiFace ? (
+            <FlipCard
+              frontImage={faceImage(faces[0]) ?? cardImage(card)}
+              backImage={twoSided ? faceImage(faces[1]) : undefined}
+              rotateDeg={rotateDeg}
+              flipped={flipped}
+              onToggle={() => setFaceIndex((index) => (index + 1) % faces.length)}
+              alt={card.name}
+              foil={item.isFoil}
+              accent={accent}
+            />
+          ) : (
+            <InteractiveCard image={image} alt={activeFace?.name ?? card.name} foil={item.isFoil} accent={accent} />
+          )}
+          {multiFace && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              onClick={() => setFaceIndex((index) => (index + 1) % faces.length)}
+            >
+              {twoSided ? <RefreshCw aria-hidden className="size-4" /> : <RotateCw aria-hidden className="size-4" />}
+              {twoSided ? `Flip to ${nextFace?.name ?? 'back'}` : `Rotate to ${nextFace?.name ?? 'other side'}`}
+            </Button>
+          )}
+          <p className="text-center text-xs text-fg-muted">
+            {multiFace
+              ? twoSided
+                ? 'Press and slide the card, or tap Flip, to see the back. '
+                : 'Press and slide the card, or tap Rotate, to read the other side. '
+              : `Move your cursor over the card${item.isFoil ? ' to see the foil shine' : ''}.`}
+          </p>
 
           {/* Buy box */}
           <div className="rounded-card border border-border bg-surface p-5 shadow-card">
@@ -335,13 +395,16 @@ export default function CardDetailsPage() {
 
         {/* RIGHT: card text + specs + prices + legalities */}
         <div className="min-w-0 space-y-6">
-          {card.oracleText && (
+          {oracleText && (
             <section className="rounded-card border border-border bg-surface p-6 shadow-card">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Card text</h2>
-              <p className="mt-3 whitespace-pre-line text-lg leading-8 text-fg">{card.oracleText}</p>
-              {card.flavorText && (
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Card text</h2>
+                {activeFace?.name && <span className="text-xs font-bold text-brand-600">{activeFace.name}</span>}
+              </div>
+              <p className="mt-3 whitespace-pre-line text-lg leading-8 text-fg">{oracleText}</p>
+              {flavorText && (
                 <p className="mt-4 whitespace-pre-line border-t border-border pt-4 font-display italic leading-7 text-fg-muted">
-                  {card.flavorText}
+                  {flavorText}
                 </p>
               )}
             </section>

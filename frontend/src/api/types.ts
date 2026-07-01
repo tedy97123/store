@@ -33,6 +33,26 @@ export interface Store {
   createdAt?: string
 }
 
+export interface CardFace {
+  name?: string
+  imageUrl?: string
+  imageUris?: {
+    normal?: string
+    small?: string
+    large?: string
+    png?: string
+  }
+  manaCost?: string
+  typeLine?: string
+  oracleText?: string
+  power?: string
+  toughness?: string
+  loyalty?: string
+  flavorText?: string
+  artist?: string
+  colors?: string[]
+}
+
 export interface CardSummary {
   id: string
   oracleId?: string
@@ -75,6 +95,8 @@ export interface CardSummary {
   lang?: string
   layout?: string
   scryfallUri?: string
+  /** Per-face art/text for multi-faced cards (transform, modal_dfc, flip, …). */
+  cardFaces?: CardFace[]
 }
 
 export interface InventoryItem {
