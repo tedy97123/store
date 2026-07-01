@@ -1,4 +1,10 @@
 @import "tailwindcss";
+@import "@fontsource/lato/400.css";
+@import "@fontsource/lato/700.css";
+@import "@fontsource/lato/900.css";
+@import "@fontsource/manrope/600.css";
+@import "@fontsource/manrope/700.css";
+@import "@fontsource/manrope/800.css";
 
 /* Class-based dark mode: toggled by adding `.dark` on <html>. */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -11,12 +17,35 @@
  *           and highly scannable, a top marketplace/product-card recommendation.
  * A 2-font system (heading + body) per typography best practice.
  */
-@import "@fontsource/lato/400.css";
-@import "@fontsource/lato/700.css";
-@import "@fontsource/lato/900.css";
-@import "@fontsource/manrope/600.css";
-@import "@fontsource/manrope/700.css";
-@import "@fontsource/manrope/800.css";
+@property --rx {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
+@property --ry {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
+@property --mx {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
+
+@property --my {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
+
+@property --op {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
 
 @theme {
   /* Brand — violet primary accent */
@@ -105,6 +134,46 @@
 body {
   @apply min-h-screen bg-bg text-fg font-sans antialiased;
 }
+
+@layer components {
+  .tilt-card {
+    transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transform-style: preserve-3d;
+    /* Smooth, springy glide toward the pointer and back to rest. */
+    transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+    will-change: transform;
+  }
+  .tilt-glare {
+    background: radial-gradient(
+      circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.5),
+      rgba(255, 255, 255, 0) 45%
+    );
+    mix-blend-mode: soft-light;
+    opacity: var(--op, 0);
+    /* Fade opacity slowly; let the highlight glide (not snap) with the pointer. */
+    transition: opacity 0.5s ease, background-position 0.2s ease-out;
+  }
+  .tilt-holo {
+    background-image: repeating-linear-gradient(
+      110deg,
+      rgba(255, 0, 132, 0.55) 0%,
+      rgba(0, 153, 255, 0.55) 12%,
+      rgba(0, 255, 170, 0.55) 24%,
+      rgba(255, 215, 0, 0.55) 36%,
+      rgba(170, 0, 255, 0.55) 48%,
+      rgba(255, 0, 132, 0.55) 60%
+    );
+    background-size: 300% 300%;
+    background-position: var(--mx, 50%) var(--my, 50%);
+    mix-blend-mode: color-dodge;
+    filter: saturate(1.4) contrast(1.1);
+    opacity: calc(var(--op, 0) * 0.65);
+    /* Ease both the fade and the sheen sweep so foil shimmers instead of jumping. */
+    transition: opacity 0.5s ease, background-position 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+}
+
 
 ::selection {
   background: var(--color-brand-500);

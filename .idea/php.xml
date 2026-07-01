@@ -117,6 +117,8 @@
       <path value="$PROJECT_DIR$/backend/vendor/symfony/cache-contracts" />
       <path value="$PROJECT_DIR$/backend/vendor/symfony/clock" />
       <path value="$PROJECT_DIR$/backend/vendor/symfony/config" />
+      <path value="$PROJECT_DIR$/backend/vendor/symfony/mime" />
+      <path value="$PROJECT_DIR$/backend/vendor/symfony/polyfill-intl-idn" />
     </include_path>
   </component>
   <component name="PhpProjectSharedConfiguration" php_language_level="8.4">

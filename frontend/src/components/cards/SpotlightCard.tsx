@@ -1,47 +1,46 @@
 import { Link } from 'react-router-dom'
-import { ImageOff } from 'lucide-react'
 import { cardImage, formatScryfallPrice } from '../../api/client'
 import type { InventoryItem } from '../../api/types'
-import { Badge } from '../ui'
+import { rarityAccent } from '../../lib/mtg'
+import { InteractiveCard } from './InteractiveCard'
 
 export interface SpotlightCardProps {
   item: InventoryItem
   slug: string
+  /** Optional corner ribbon label (e.g. "Featured"). */
+  ribbon?: string
 }
 
 /**
- * SpotlightCard — image-forward card used in the storefront spotlight carousel.
- * Flat enterprise styling using design-system tokens and Badge primitive.
+ * SpotlightCard — displays a real card in the spotlight rail using the same
+ * holographic InteractiveCard as the details page (3D tilt + glare, foil sheen),
+ * with a compact name / set / price caption beneath.
  */
-export function SpotlightCard({ item, slug }: SpotlightCardProps) {
-  const image = cardImage(item.card)
+export function SpotlightCard({ item, slug, ribbon }: SpotlightCardProps) {
+  const price = formatScryfallPrice(item.card, item.isFoil ? 'foil' : 'nonfoil')
+
   return (
-    <Link
-      to={`/s/${slug}/cards/${item.id}`}
-      className="group min-w-[14rem] max-w-[18rem] overflow-hidden rounded-card border border-border bg-surface shadow-card transition-colors hover:border-brand-300 xl:min-w-0"
-    >
-      <div className="grid aspect-[5/7] place-items-center bg-bg p-3">
-        {image ? (
-          <img src={image} alt={item.card.name} className="max-h-full rounded-btn" />
-        ) : (
-          <ImageOff aria-hidden className="size-6 text-fg-muted" />
-        )}
-      </div>
-      <div className="border-t border-border p-3">
-        <h3 className="line-clamp-2 font-bold leading-snug text-fg group-hover:text-brand-600">
+    <Link to={`/s/${slug}/cards/${item.id}`} className="group relative w-40 flex-shrink-0 snap-start sm:w-52">
+      {ribbon && (
+        <span className="absolute right-2 top-2 z-20 rounded-full bg-brand-500 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide text-white shadow">
+          {ribbon}
+        </span>
+      )}
+      <InteractiveCard
+        image={cardImage(item.card)}
+        alt={item.card.name}
+        foil={item.isFoil}
+        accent={rarityAccent(item.card.rarity)}
+        maxTilt={12}
+        shadow={false}
+      />
+      <div className="mt-2 px-0.5">
+        <h3 className="truncate font-display text-sm font-bold tracking-tight text-fg group-hover:text-brand-600">
           {item.card.name}
         </h3>
-        <p className="mt-1 text-xs text-fg-muted">{item.card.setName ?? item.card.setCode ?? '-'}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Badge>{item.card.setCode?.toUpperCase() ?? '-'}</Badge>
-          <Badge>{item.condition}</Badge>
-          <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
-        </div>
-        <div className="mt-3">
-          <p className="text-xs uppercase text-fg-muted">Market price</p>
-          <p className="text-lg font-bold text-fg">
-            {formatScryfallPrice(item.card, item.isFoil ? 'foil' : 'nonfoil')}
-          </p>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-fg-muted">{item.card.setCode?.toUpperCase() ?? '—'}</span>
+          <span className="font-bold text-fg">{price}</span>
         </div>
       </div>
     </Link>

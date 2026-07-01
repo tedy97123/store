@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import type { ReactNode } from 'react'
 import { tv, type VariantProps } from 'tailwind-variants'
 import { Loader2, TriangleAlert, Inbox, type LucideIcon } from 'lucide-react'

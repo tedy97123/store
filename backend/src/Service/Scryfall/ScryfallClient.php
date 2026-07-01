@@ -276,32 +276,32 @@ class ScryfallClient
 
         $card
             ->setOracleId(Uuid::fromString($data['oracle_id']))
-            ->setName((string) $data['name'])
-            ->setSetCode((string) ($data['set'] ?? ''))
-            ->setCollectorNumber((string) ($data['collector_number'] ?? ''))
-            ->setRarity(isset($data['rarity']) ? (string) $data['rarity'] : null)
-            ->setManaCost(isset($data['mana_cost']) ? (string) $data['mana_cost'] : null)
-            ->setTypeLine(isset($data['type_line']) ? (string) $data['type_line'] : null)
+            ->setName($this->truncate((string) $data['name'], 255))
+            ->setSetCode($this->truncate((string) ($data['set'] ?? ''), 10))
+            ->setCollectorNumber($this->truncate((string) ($data['collector_number'] ?? ''), 20))
+            ->setRarity(isset($data['rarity']) ? $this->truncate((string) $data['rarity'], 20) : null)
+            ->setManaCost(isset($data['mana_cost']) ? $this->truncate((string) $data['mana_cost'], 64) : null)
+            ->setTypeLine(isset($data['type_line']) ? $this->truncate((string) $data['type_line'], 255) : null)
             ->setOracleText(isset($data['oracle_text']) ? (string) $data['oracle_text'] : null)
             ->setCmc(isset($data['cmc']) ? (float) $data['cmc'] : null)
             ->setImageUris(isset($data['image_uris']) && is_array($data['image_uris']) ? $data['image_uris'] : null)
             ->setPrices(isset($data['prices']) && is_array($data['prices']) ? $data['prices'] : null)
-            ->setSetName(isset($data['set_name']) ? (string) $data['set_name'] : null)
+            ->setSetName(isset($data['set_name']) ? $this->truncate((string) $data['set_name'], 255) : null)
             ->setColors(isset($data['colors']) && is_array($data['colors']) ? array_values($data['colors']) : null)
             ->setColorIdentity(isset($data['color_identity']) && is_array($data['color_identity']) ? array_values($data['color_identity']) : null)
             ->setKeywords(isset($data['keywords']) && is_array($data['keywords']) ? array_values($data['keywords']) : null)
-            ->setPower(isset($data['power']) ? (string) $data['power'] : null)
-            ->setToughness(isset($data['toughness']) ? (string) $data['toughness'] : null)
-            ->setLoyalty(isset($data['loyalty']) ? (string) $data['loyalty'] : null)
-            ->setArtist(isset($data['artist']) ? (string) $data['artist'] : null)
+            ->setPower(isset($data['power']) ? $this->truncate((string) $data['power'], 16) : null)
+            ->setToughness(isset($data['toughness']) ? $this->truncate((string) $data['toughness'], 16) : null)
+            ->setLoyalty(isset($data['loyalty']) ? $this->truncate((string) $data['loyalty'], 16) : null)
+            ->setArtist(isset($data['artist']) ? $this->truncate((string) $data['artist'], 255) : null)
             ->setFlavorText(isset($data['flavor_text']) ? (string) $data['flavor_text'] : null)
             ->setLegalities(isset($data['legalities']) && is_array($data['legalities']) ? $data['legalities'] : null)
             ->setFinishes(isset($data['finishes']) && is_array($data['finishes']) ? array_values($data['finishes']) : null)
             ->setGames(isset($data['games']) && is_array($data['games']) ? array_values($data['games']) : null)
             ->setReleasedAt(isset($data['released_at']) ? new \DateTimeImmutable((string) $data['released_at']) : null)
-            ->setLang(isset($data['lang']) ? (string) $data['lang'] : null)
-            ->setLayout(isset($data['layout']) ? (string) $data['layout'] : null)
-            ->setScryfallUri(isset($data['scryfall_uri']) ? (string) $data['scryfall_uri'] : null)
+            ->setLang(isset($data['lang']) ? $this->truncate((string) $data['lang'], 16) : null)
+            ->setLayout(isset($data['layout']) ? $this->truncate((string) $data['layout'], 32) : null)
+            ->setScryfallUri(isset($data['scryfall_uri']) ? $this->truncate((string) $data['scryfall_uri'], 512) : null)
             ->setScryfallData($data)
             ->setScryfallUpdatedAt(isset($data['updated_at']) ? new \DateTimeImmutable((string) $data['updated_at']) : null);
 
@@ -312,5 +312,10 @@ class ScryfallClient
         }
 
         return 'updated';
+    }
+
+    private function truncate(string $value, int $maxLength): string
+    {
+        return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
     }
 }

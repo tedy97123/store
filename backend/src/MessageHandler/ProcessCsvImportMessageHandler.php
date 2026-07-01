@@ -196,8 +196,18 @@ final readonly class ProcessCsvImportMessageHandler
         }
 
         $job->setStatus(CsvImportJob::STATUS_FAILED);
-        $job->setErrorMessage($e->getMessage());
+        $job->setErrorMessage($this->formatFailureMessage($e));
         $job->setFinishedAt(new \DateTimeImmutable());
         $manager->flush();
+    }
+
+    private function formatFailureMessage(\Throwable $e): string
+    {
+        $message = $e->getMessage();
+        if (strlen($message) <= 250) {
+            return $message;
+        }
+
+        return substr($message, 0, 247).'...';
     }
 }

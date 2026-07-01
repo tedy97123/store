@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { Badge } from '../../components/ui'
 import { formatPrice, scryfallPriceCents } from '../../api/client'
 import type { BadgeProps } from '../../components/ui'

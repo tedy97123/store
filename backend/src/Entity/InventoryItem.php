@@ -195,6 +195,18 @@ class InventoryItem
         return $this->isFoil;
     }
 
+    /**
+     * Explicit getter bound to the `isFoil` attribute. Without this the serializer
+     * maps isFoil()/setIsFoil() to an attribute named `foil` (the `is` prefix is
+     * stripped), leaving the `isFoil` group attribute with no readable getter — so
+     * it was silently omitted from every response.
+     */
+    #[Groups(['inventory:read', 'inventory:write'])]
+    public function getIsFoil(): bool
+    {
+        return $this->isFoil;
+    }
+
     public function setIsFoil(bool $isFoil): static
     {
         $this->isFoil = $isFoil;

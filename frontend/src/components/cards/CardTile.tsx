@@ -2,7 +2,9 @@ import { Link } from 'react-router-dom'
 import { ImageOff } from 'lucide-react'
 import { cardImage, formatScryfallPrice } from '../../api/client'
 import type { InventoryItem } from '../../api/types'
-import { Badge } from '../ui'
+import { cx } from '../../lib/cx'
+import { useTilt } from '../../hooks'
+import { rarityAccent, rarityLabel } from '../../lib/mtg'
 
 export interface CardTileProps {
   item: InventoryItem
@@ -10,47 +12,68 @@ export interface CardTileProps {
 }
 
 /**
- * CardTile — list-style storefront result card (image + meta + price footer).
- * Flat enterprise styling using design-system tokens and Badge primitive.
+ * CardTile — image-forward storefront result card (grid view). The art fills
+ * the top with a subtle pointer-driven holographic tilt (glare always, rainbow
+ * holo for foils); rarity + foil accents add game flavor; the footer keeps the
+ * name, printing and market price scannable.
  */
 export function CardTile({ item, slug }: CardTileProps) {
   const image = cardImage(item.card)
+  const accent = rarityAccent(item.card.rarity)
+  const price = formatScryfallPrice(item.card, item.isFoil ? 'foil' : 'nonfoil')
+  const { ref, onPointerMove, onPointerLeave } = useTilt(9)
+
   return (
     <Link
       to={`/s/${slug}/cards/${item.id}`}
-      className="group flex flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card transition-colors hover:border-brand-300"
+      className={cx(
+        'group flex flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card',
+        'transition-shadow duration-200 ease-out hover:shadow-[0_16px_40px_-16px_rgb(16_24_40_/0.30)]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+      )}
     >
-      <div className="flex gap-4 p-4">
-        <div className="grid h-36 w-24 flex-shrink-0 place-items-center rounded-card border border-border bg-bg">
+      {/* Card art with holographic tilt */}
+      <div ref={ref} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave} className="perspective-[900px]">
+        <div className="tilt-card relative aspect-5/7 overflow-hidden bg-bg">
           {image ? (
-            <img src={image} alt={item.card.name} className="max-h-32 rounded-btn" />
+            <img src={image} alt={item.card.name} loading="lazy" className="size-full object-cover" />
           ) : (
-            <ImageOff aria-hidden className="size-6 text-fg-muted" />
+            <div className="grid size-full place-items-center">
+              <ImageOff aria-hidden className="size-7 text-fg-muted" />
+            </div>
           )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 font-bold leading-snug text-brand-600">{item.card.name}</h3>
-          <p className="mt-1 line-clamp-2 text-xs text-fg-muted">{item.card.typeLine}</p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <Badge>{item.card.setCode?.toUpperCase() ?? '-'}</Badge>
-            <Badge>{item.condition}</Badge>
-            <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
-          </div>
+
+          {/* Holographic overlays (the sheen itself signals a foil — no pill needed) */}
+          {image && <span aria-hidden className="tilt-glare pointer-events-none absolute inset-0" />}
+          {image && item.isFoil && <span aria-hidden className="tilt-holo pointer-events-none absolute inset-0" />}
+
+          {/* Rarity dot */}
+          {item.card.rarity && (
+            <span
+              className="absolute right-2 top-2 z-10 size-3 rounded-full ring-2 ring-white/70"
+              style={{ backgroundColor: accent }}
+              title={rarityLabel(item.card.rarity)}
+            />
+          )}
+
+          {/* Price chip */}
+          <span className="absolute bottom-2 right-2 z-10 rounded-full bg-black/70 px-2.5 py-1 text-sm font-bold text-white backdrop-blur-sm">
+            {price}
+          </span>
         </div>
       </div>
-      <div className="mt-auto border-t border-border bg-bg px-4 py-3">
-        <div className="flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-xs text-fg-muted">{item.card.setName ?? 'Unknown set'}</p>
-            <p className="text-xs font-medium text-fg-muted">{item.quantity} available</p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs uppercase text-fg-muted">Market price</p>
-            <p className="text-xl font-bold text-fg">
-              {formatScryfallPrice(item.card, item.isFoil ? 'foil' : 'nonfoil')}
-            </p>
-          </div>
-        </div>
+
+      {/* Footer */}
+      <div className="flex flex-1 flex-col p-3">
+        <h3 className="truncate font-display text-sm font-bold tracking-tight text-fg group-hover:text-brand-600">
+          {item.card.name}
+        </h3>
+        <p className="mt-0.5 truncate text-xs text-fg-muted">
+          {item.card.setCode?.toUpperCase() ?? '—'} · {item.condition}
+          {item.card.rarity ? ` · ${rarityLabel(item.card.rarity)}` : ''}
+          {item.isFoil ? ' · Foil' : ''}
+        </p>
+        <p className="mt-2 text-xs font-medium text-fg-muted">{item.quantity} available</p>
       </div>
     </Link>
   )
