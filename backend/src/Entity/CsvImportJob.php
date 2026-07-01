@@ -46,7 +46,7 @@ class CsvImportJob
     #[ORM\Column]
     private int $failedRows = 0;
 
-    #[ORM\Column(nullable: true)]
+    #[ORM\Column(type: 'text', nullable: true)]
     private ?string $errorMessage = null;
 
     #[ORM\Column]

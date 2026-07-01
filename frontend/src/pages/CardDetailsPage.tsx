@@ -4,13 +4,13 @@ import {
   ArrowLeft,
   ExternalLink,
   Heart,
-  ImageOff,
   ListPlus,
   Settings,
   ShoppingCart,
+  Sparkles,
   UserCircle,
 } from 'lucide-react'
-import api, { cardImage, formatScryfallPrice } from '../api/client'
+import api, { cardImage, formatScryfallPrice, unwrapCollection } from '../api/client'
 import type { CustomerFavorite, InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -21,25 +21,25 @@ import {
   useStore,
   useStoreTheme,
 } from '../hooks'
-import {
-  Badge,
-  Button,
-  buttonVariants,
-  Card,
-  CardBody,
-  CardHeader,
-  ErrorState,
-  LoadingPanel,
-  PageHeader,
-} from '../components/ui'
+import { Badge, Button, buttonVariants, ErrorState, LoadingPanel } from '../components/ui'
+import { InteractiveCard, SpotlightCard } from '../components/cards'
+import { FOIL_GRADIENT, rarityAccent, rarityLabel } from '../lib/mtg'
+
+/** Slugify a card name for an EDHREC deck-context link (front face only). */
+function edhrecUrl(name: string): string {
+  const slug = name
+    .split('//')[0]
+    .trim()
+    .toLowerCase()
+    .replace(/['’.,]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `https://edhrec.com/cards/${slug}`
+}
 
 function formatDate(value?: string): string {
   if (!value) return '-'
-  return new Date(value).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function legalities(card: InventoryItem['card']) {
@@ -70,6 +70,16 @@ export default function CardDetailsPage() {
     },
   })
 
+  // Shared cache key with StorePage — usually warm — powers the recommendations rail.
+  const { data: inventory = [] } = useQuery({
+    queryKey: ['inventory', slug],
+    enabled: Boolean(slug),
+    queryFn: async () => {
+      const { data } = await api.get(`/stores/${slug}/inventory`)
+      return unwrapCollection<InventoryItem>(data)
+    },
+  })
+
   const { data: favorites = [] } = useCustomerFavorites(slug, Boolean(user))
   const { data: wantList = [] } = useCustomerWantList(slug, Boolean(user))
 
@@ -81,8 +91,6 @@ export default function CardDetailsPage() {
         await api.put(`/stores/${slug}/customer/favorites/${inventoryItem.id}`)
       }
     },
-    // Optimistic toggle: update the cache immediately so rapid clicks read the
-    // already-flipped state and the button reflects the pending result.
     onMutate: async ({ inventoryItem, favorite }) => {
       await queryClient.cancelQueries({ queryKey: customerKeys.favorites(slug) })
       const previous = queryClient.getQueryData<CustomerFavorite[]>(customerKeys.favorites(slug))
@@ -133,14 +141,16 @@ export default function CardDetailsPage() {
 
   if (error || !item) {
     return (
-      <Card>
+      <div className="rounded-card border border-border bg-surface">
         <ErrorState title="Card listing not found" description="This listing could not be loaded." />
-      </Card>
+      </div>
     )
   }
 
   const card = item.card
   const finish = item.isFoil ? 'foil' : 'nonfoil'
+  const image = cardImage(card)
+  const accent = rarityAccent(card.rarity)
   const legalFormats = legalities(card)
   const isFavorite = favorites.some((favorite) => favorite.inventoryItem?.id === item.id)
   const isWanted = wantList.some(
@@ -149,10 +159,9 @@ export default function CardDetailsPage() {
       (entry.cardName.toLowerCase() === item.card.name.toLowerCase() && entry.setCode === item.card.setCode),
   )
 
-  // Flat definition list — only fields that actually have a value are shown
-  // (no more empty "MANA COST —" / "KEYWORDS —" tiles).
-  const powerToughness =
-    card.power || card.toughness ? `${card.power ?? '—'} / ${card.toughness ?? '—'}` : ''
+  const related = inventory.filter((i) => i.id !== item.id).slice(0, 10)
+
+  const powerToughness = card.power || card.toughness ? `${card.power ?? '—'} / ${card.toughness ?? '—'}` : ''
   const specs = (
     [
       { label: 'Set', value: card.setName },
@@ -168,7 +177,6 @@ export default function CardDetailsPage() {
     ] as { label: string; value?: string; capitalize?: boolean }[]
   ).filter((spec): spec is { label: string; value: string; capitalize?: boolean } => Boolean(spec.value))
 
-  // Only show Scryfall price rows that have a real value (nonfoil always shown).
   const priceRows = (
     [
       { label: 'Nonfoil', value: formatScryfallPrice(card, 'nonfoil') },
@@ -178,121 +186,91 @@ export default function CardDetailsPage() {
   ).filter((row, index) => index === 0 || row.value !== '-')
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={card.name}
-        subtitle={
-          <Link
-            to={`/s/${slug}`}
-            className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
-          >
-            <ArrowLeft aria-hidden className="size-4" />
-            Back to {store?.name ?? 'store'}
-          </Link>
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {user && (
-              <Link to={`/s/${slug}/account`} className={buttonVariants({ variant: 'ghost' })}>
-                <UserCircle aria-hidden className="size-4" />
-                My account
-              </Link>
-            )}
-            {canManage && (
-              <Link to={`/s/${slug}/admin`} className={buttonVariants({ variant: 'secondary' })}>
-                <Settings aria-hidden className="size-4" />
-                Manage listing
-              </Link>
-            )}
+    <div className="space-y-8">
+      {/* Immersive art hero */}
+      <section className="relative overflow-hidden rounded-card border border-border">
+        {image && (
+          <img src={image} alt="" aria-hidden className="absolute inset-0 size-full scale-125 object-cover opacity-40 blur-2xl" />
+        )}
+        <div aria-hidden className="absolute inset-0 bg-linear-to-t from-surface via-surface/88 to-surface/55" />
+        <div className="relative flex flex-col gap-4 p-6 sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Link to={`/s/${slug}`} className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline">
+              <ArrowLeft aria-hidden className="size-4" />
+              Back to {store?.name ?? 'store'}
+            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              {user && (
+                <Link to={`/s/${slug}/account`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+                  <UserCircle aria-hidden className="size-4" />
+                  My account
+                </Link>
+              )}
+              {canManage && (
+                <Link to={`/s/${slug}/admin`} className={buttonVariants({ variant: 'secondary', size: 'sm' })}>
+                  <Settings aria-hidden className="size-4" />
+                  Manage listing
+                </Link>
+              )}
+            </div>
           </div>
-        }
-      />
-
-      <div className="grid gap-8 lg:grid-cols-[20rem_minmax(0,1fr)_19rem]">
-        {/* Card image — prominent, flat, sticky on scroll */}
-        <div className="self-start lg:sticky lg:top-8">
-          {cardImage(card) ? (
-            <img
-              src={cardImage(card)}
-              alt={card.name}
-              className="w-full rounded-2xl shadow-card"
-            />
-          ) : (
-            <div className="grid aspect-[5/7] place-items-center rounded-2xl border border-border bg-surface text-fg-muted">
-              <ImageOff aria-hidden className="size-8" />
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.15em] text-brand-600">
+              {(card.setCode ?? '—').toUpperCase()} · #{card.collectorNumber ?? '—'}
+            </p>
+            <h1 className="mt-1 max-w-3xl font-display text-4xl font-bold tracking-tight text-fg sm:text-5xl">{card.name}</h1>
+            {card.typeLine && <p className="mt-2 text-lg text-fg-muted">{card.typeLine}</p>}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {card.rarity && (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-bold capitalize text-fg"
+                >
+                  <span className="size-2.5 rounded-full" style={{ backgroundColor: accent }} />
+                  {rarityLabel(card.rarity)}
+                </span>
+              )}
+              {item.isFoil && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-white/60 px-2.5 py-1 text-xs font-bold text-black/80"
+                  style={{ backgroundImage: FOIL_GRADIENT }}
+                >
+                  <Sparkles aria-hidden className="size-3.5" />
+                  Foil
+                </span>
+              )}
+              <Badge>{item.condition}</Badge>
             </div>
-          )}
+          </div>
         </div>
+      </section>
 
-        {/* Main details */}
-        <Card className="min-w-0">
-          <CardBody className="space-y-6">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-wide text-brand-600">
-                {(card.setCode ?? '—').toUpperCase()} · #{card.collectorNumber ?? '—'}
-              </p>
-              <h2 className="mt-1 font-display text-4xl font-bold tracking-tight text-fg">{card.name}</h2>
-              {card.typeLine && <p className="mt-2 text-fg-muted">{card.typeLine}</p>}
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {card.rarity && (
-                  <Badge tone={rarityTone(card.rarity)} className="capitalize">
-                    {card.rarity}
-                  </Badge>
-                )}
-                <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
-                <Badge>{item.condition}</Badge>
-              </div>
+      <div className="grid gap-8 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        {/* LEFT: image + sticky buy box */}
+        <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+          <InteractiveCard image={image} alt={card.name} foil={item.isFoil} accent={accent} />
+          <p className="text-center text-xs text-fg-muted">Move your cursor over the card{item.isFoil ? ' to see the foil shine' : ''}.</p>
+
+          {/* Buy box */}
+          <div className="rounded-card border border-border bg-surface p-5 shadow-card">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">Market price</p>
+              <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
             </div>
+            <p className="mt-1 font-display text-4xl font-bold text-fg">{formatScryfallPrice(card, finish)}</p>
 
-            {card.oracleText && (
-              <div className="rounded-card bg-bg p-5">
-                <p className="whitespace-pre-line leading-7 text-fg">{card.oracleText}</p>
-                {card.flavorText && (
-                  <p className="mt-4 whitespace-pre-line border-t border-border pt-4 text-sm italic text-fg-muted">
-                    {card.flavorText}
-                  </p>
-                )}
-              </div>
-            )}
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4">
+              <Fact label="Condition" value={item.condition} />
+              <Fact label="Available" value={String(item.quantity)} />
+              <Fact label="Set" value={card.setCode?.toUpperCase() ?? '—'} />
+              <Fact label="Collector" value={`#${card.collectorNumber ?? '—'}`} />
+            </dl>
 
-            {specs.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Card details</h3>
-                <dl className="mt-3 grid gap-x-8 gap-y-4 sm:grid-cols-2">
-                  {specs.map((spec) => (
-                    <Spec key={spec.label} label={spec.label} value={spec.value} capitalize={spec.capitalize} />
-                  ))}
-                </dl>
-              </div>
-            )}
-          </CardBody>
-        </Card>
-
-        {/* Right rail */}
-        <div className="space-y-4">
-          <Card>
-            <CardBody>
-              <div className="flex items-baseline justify-between gap-2">
-                <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">Market price</p>
-                <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
-              </div>
-              <p className="mt-1 font-display text-4xl font-bold text-fg">{formatScryfallPrice(card, finish)}</p>
-              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4">
-                <Fact label="Condition" value={item.condition} />
-                <Fact label="Available" value={String(item.quantity)} />
-                <Fact label="Set" value={card.setCode?.toUpperCase() ?? '—'} />
-                <Fact label="Collector" value={`#${card.collectorNumber ?? '—'}`} />
-              </dl>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Customer actions" />
-            <CardBody className="space-y-2">
+            <div className="mt-5 space-y-2">
               {user ? (
                 <>
                   <Button
                     variant={isFavorite ? 'secondary' : 'primary'}
+                    size="lg"
                     className="w-full"
                     loading={favoriteMutation.isPending}
                     disabled={favoriteMutation.isPending}
@@ -303,16 +281,13 @@ export default function CardDetailsPage() {
                   </Button>
                   <Button
                     variant="secondary"
+                    size="lg"
                     className="w-full"
                     loading={wantListMutation.isPending}
                     disabled={wantListMutation.isPending || isWanted}
                     onClick={() => wantListMutation.mutate(item)}
                   >
-                    {isWanted ? (
-                      <ShoppingCart aria-hidden className="size-4" />
-                    ) : (
-                      <ListPlus aria-hidden className="size-4" />
-                    )}
+                    {isWanted ? <ShoppingCart aria-hidden className="size-4" /> : <ListPlus aria-hidden className="size-4" />}
                     {isWanted ? 'On want list' : 'Add to want list'}
                   </Button>
                   {favoriteMutation.isError && (
@@ -327,64 +302,106 @@ export default function CardDetailsPage() {
                   )}
                 </>
               ) : (
-                <Link to="/login" className={`${buttonVariants({ variant: 'primary' })} w-full`}>
+                <Link to="/login" className={`${buttonVariants({ variant: 'primary', size: 'lg' })} w-full`}>
                   Sign in to save cards
                 </Link>
               )}
-            </CardBody>
-          </Card>
+            </div>
 
-          <Card>
-            <CardHeader title="Scryfall prices" />
-            <CardBody className="space-y-2">
-              {priceRows.map((row) => (
-                <PriceRow key={row.label} label={row.label} value={row.value} />
-              ))}
+            <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-4">
               {card.scryfallUri && (
                 <a
                   href={card.scryfallUri}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
+                  className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
                 >
                   <ExternalLink aria-hidden className="size-4" />
-                  View on Scryfall
+                  Scryfall
                 </a>
               )}
-            </CardBody>
-          </Card>
+              <a
+                href={edhrecUrl(card.name)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
+              >
+                <ExternalLink aria-hidden className="size-4" />
+                EDHREC
+              </a>
+            </div>
+          </div>
+        </div>
 
-          {legalFormats.length > 0 && (
-            <Card>
-              <CardHeader title="Legal formats" />
-              <CardBody>
-                <div className="flex flex-wrap gap-1.5">
+        {/* RIGHT: card text + specs + prices + legalities */}
+        <div className="min-w-0 space-y-6">
+          {card.oracleText && (
+            <section className="rounded-card border border-border bg-surface p-6 shadow-card">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Card text</h2>
+              <p className="mt-3 whitespace-pre-line text-lg leading-8 text-fg">{card.oracleText}</p>
+              {card.flavorText && (
+                <p className="mt-4 whitespace-pre-line border-t border-border pt-4 font-display italic leading-7 text-fg-muted">
+                  {card.flavorText}
+                </p>
+              )}
+            </section>
+          )}
+
+          {specs.length > 0 && (
+            <section className="rounded-card border border-border bg-surface p-6 shadow-card">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Card details</h2>
+              <dl className="mt-4 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                {specs.map((spec) => (
+                  <Spec key={spec.label} label={spec.label} value={spec.value} capitalize={spec.capitalize} />
+                ))}
+              </dl>
+            </section>
+          )}
+
+          <div className="grid gap-6 sm:grid-cols-2">
+            <section className="rounded-card border border-border bg-surface p-6 shadow-card">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Scryfall prices</h2>
+              <div className="mt-3 space-y-2">
+                {priceRows.map((row) => (
+                  <PriceRow key={row.label} label={row.label} value={row.value} />
+                ))}
+              </div>
+            </section>
+
+            {legalFormats.length > 0 && (
+              <section className="rounded-card border border-border bg-surface p-6 shadow-card">
+                <h2 className="text-xs font-bold uppercase tracking-wide text-fg-muted">Legal formats</h2>
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {legalFormats.map(([format]) => (
                     <Badge key={format} tone="success" className="uppercase">
                       {format}
                     </Badge>
                   ))}
                 </div>
-              </CardBody>
-            </Card>
-          )}
+              </section>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* More from this store */}
+      {related.length > 0 && (
+        <section>
+          <div className="mb-4 flex items-end justify-between">
+            <h2 className="font-display text-2xl font-bold tracking-tight text-fg">More from {store?.name ?? 'this store'}</h2>
+            <Link to={`/s/${slug}`} className="text-sm font-bold text-brand-600 hover:underline">
+              View all →
+            </Link>
+          </div>
+          <div className="scrollbar-none flex gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {related.map((rel) => (
+              <SpotlightCard key={rel.id} item={rel} slug={slug} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
-}
-
-type RarityTone = 'brand' | 'success' | 'warning' | 'danger' | 'neutral'
-
-function rarityTone(rarity?: string): RarityTone {
-  switch ((rarity ?? '').toLowerCase()) {
-    case 'mythic':
-      return 'warning'
-    case 'rare':
-      return 'brand'
-    default:
-      return 'neutral'
-  }
 }
 
 function Spec({ label, value, capitalize = false }: { label: string; value: string; capitalize?: boolean }) {

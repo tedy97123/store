@@ -10,7 +10,9 @@ use App\MultiTenancy\TenantContext;
 use App\Repository\CardRepository;
 use App\Repository\InventoryItemRepository;
 use App\Service\Inventory\StoreInventoryWriter;
+use App\Service\Scryfall\ScryfallClient;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Uid\Uuid;
@@ -25,6 +27,8 @@ final readonly class StoreInventoryProcessor implements ProcessorInterface
         private InventoryItemRepository $inventoryItemRepository,
         private StoreInventoryWriter $inventoryWriter,
         private EntityManagerInterface $entityManager,
+        private ScryfallClient $scryfallClient,
+        private LoggerInterface $logger,
     ) {
     }
 
@@ -39,7 +43,10 @@ final readonly class StoreInventoryProcessor implements ProcessorInterface
             throw new NotFoundHttpException('Store not found.');
         }
 
-        if (null === $data->getCard() && $data->getCardId()) {
+        // Resolve cardId whenever supplied — on PATCH this lets an owner switch the
+        // listing to a different printing (previously ignored because the item
+        // already had a card).
+        if ($data->getCardId()) {
             try {
                 $card = $this->cardRepository->find(Uuid::fromString($data->getCardId()));
             } catch (\InvalidArgumentException) {
@@ -60,6 +67,19 @@ final readonly class StoreInventoryProcessor implements ProcessorInterface
             $targetCard = $data->getCard() ?? $existing->getCard();
             if (!$targetCard instanceof \App\Entity\Card) {
                 throw new BadRequestHttpException('Card is required.');
+            }
+
+            // Enrich the printing from Scryfall if we've never fetched its data, so
+            // market price becomes available for this card going forward.
+            if (null === $targetCard->getScryfallData()) {
+                try {
+                    $this->scryfallClient->fetchCardById($targetCard->getId());
+                } catch (\Throwable $e) {
+                    $this->logger->warning('Scryfall enrichment failed for card {id}: {error}', [
+                        'id' => (string) $targetCard->getId(),
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             $conflict = $this->inventoryItemRepository->findOneBy([

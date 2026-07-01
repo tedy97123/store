@@ -5,6 +5,8 @@ namespace App\Repository;
 use App\Entity\CsvImportJob;
 use App\Entity\CsvImportRow;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\Persistence\ManagerRegistry;
 
 /** @extends ServiceEntityRepository<CsvImportRow> */
@@ -63,6 +65,7 @@ class CsvImportRowRepository extends ServiceEntityRepository
             || $platform instanceof \Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 
         return $entityManager->wrapInTransaction(function () use ($job, $limit, $connection, $supportsSkipLocked): array {
+            /** @noinspection SqlNoDataSourceInspection */
             $sql = 'SELECT id FROM csv_import_rows WHERE job_id = :job AND status = :status ORDER BY row_index ASC LIMIT :limit FOR UPDATE';
             if ($supportsSkipLocked) {
                 $sql .= ' SKIP LOCKED';
@@ -76,9 +79,9 @@ class CsvImportRowRepository extends ServiceEntityRepository
                     'limit' => $limit,
                 ],
                 [
-                    'job' => \PDO::PARAM_INT,
-                    'status' => \PDO::PARAM_STR,
-                    'limit' => \PDO::PARAM_INT,
+                    'job' => ParameterType::INTEGER,
+                    'status' => ParameterType::STRING,
+                    'limit' => ParameterType::INTEGER,
                 ],
             )->fetchFirstColumn();
 
@@ -88,6 +91,7 @@ class CsvImportRowRepository extends ServiceEntityRepository
 
             $ids = array_map('intval', $ids);
 
+            /** @noinspection SqlNoDataSourceInspection */
             $connection->executeStatement(
                 'UPDATE csv_import_rows SET status = :processing WHERE id IN (:ids)',
                 [
@@ -95,14 +99,14 @@ class CsvImportRowRepository extends ServiceEntityRepository
                     'ids' => $ids,
                 ],
                 [
-                    'processing' => \PDO::PARAM_STR,
-                    'ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                    'processing' => ParameterType::STRING,
+                    'ids' => ArrayParameterType::INTEGER,
                 ],
             );
 
             $rows = $this->createQueryBuilder('row')
                 ->andWhere('row.id IN (:ids)')
-                ->setParameter('ids', $ids)
+                ->setParameter('ids', $ids, ArrayParameterType::INTEGER)
                 ->orderBy('row.rowIndex', 'ASC')
                 ->getQuery()
                 ->getResult();

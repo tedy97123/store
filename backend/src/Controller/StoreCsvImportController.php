@@ -284,7 +284,10 @@ final class StoreCsvImportController extends AbstractController
             return false;
         }
 
-        $mime = (string) ($file->getMimeType() ?? $file->getClientMimeType());
+        // Do not call getMimeType() here: it requires Symfony MIME guessers such
+        // as the PHP fileinfo extension, which may be disabled in local/dev
+        // runtimes. The parser validates the actual CSV shape after this guard.
+        $mime = (string) $file->getClientMimeType();
 
         return '' === $mime || in_array(strtolower($mime), self::ALLOWED_MIME_TYPES, true);
     }
@@ -378,19 +381,24 @@ final class StoreCsvImportController extends AbstractController
         return (new CsvImportRow())
             ->setJob($job)
             ->setRowIndex((int) ($rowData['rowIndex'] ?? 0))
-            ->setName((string) ($rowData['name'] ?? ''))
-            ->setGame((string) ($rowData['game'] ?? ''))
-            ->setSetCode((string) ($rowData['set'] ?? ''))
-            ->setCondition((string) ($rowData['condition'] ?? 'NM'))
+            ->setName($this->truncate((string) ($rowData['name'] ?? ''), 255))
+            ->setGame($this->truncate((string) ($rowData['game'] ?? ''), 80))
+            ->setSetCode($this->truncate((string) ($rowData['set'] ?? ''), 120))
+            ->setCondition($this->truncate((string) ($rowData['condition'] ?? 'NM'), 16))
             ->setIsFoil((bool) ($rowData['isFoil'] ?? false))
-            ->setRarity((string) ($rowData['rarity'] ?? ''))
+            ->setRarity($this->truncate((string) ($rowData['rarity'] ?? ''), 80))
             ->setQuantity((int) ($rowData['quantity'] ?? 0))
-            ->setVariant((string) ($rowData['variant'] ?? ''))
-            ->setCollectorNumber((string) ($rowData['collectorNumber'] ?? ''))
+            ->setVariant($this->truncate((string) ($rowData['variant'] ?? ''), 255))
+            ->setCollectorNumber($this->truncate((string) ($rowData['collectorNumber'] ?? ''), 80))
             ->setStatus((string) ($rowData['status'] ?? CsvImportRow::STATUS_QUEUED))
             ->setCard(isset($rowData['card']) && is_array($rowData['card']) ? $rowData['card'] : null)
             ->setError(isset($rowData['error']) ? (string) $rowData['error'] : null)
             ->setImportedItemId(isset($rowData['importedItemId']) ? (int) $rowData['importedItemId'] : null);
+    }
+
+    private function truncate(string $value, int $maxLength): string
+    {
+        return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
     }
 
     /** @return array<string, mixed> */
