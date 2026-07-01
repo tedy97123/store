@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { TrendingUp } from 'lucide-react'
-import api, { formatPrice, httpStatus, unwrapCollection } from '../../api/client'
-import type { Order } from '../../api/types'
+import { formatPrice, httpStatus } from '../../api/client'
+import { useOrders } from '../../hooks'
+import { formatDate } from '../../lib/format'
 import {
   Card,
   CardHeader,
@@ -22,14 +22,6 @@ import {
 
 const REVENUE_STATUSES = new Set(['paid', 'shipped', 'completed'])
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
 function MetricCard({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
@@ -42,14 +34,7 @@ function MetricCard({ label, value }: { label: string; value: string | number })
 }
 
 export default function ReportsTab({ slug }: { slug: string }) {
-  const { data: orders = [], isLoading, error } = useQuery({
-    queryKey: ['orders', slug],
-    queryFn: async () => {
-      const { data } = await api.get(`/stores/${slug}/orders`)
-      return unwrapCollection<Order>(data)
-    },
-    retry: false,
-  })
+  const { data: orders = [], isLoading, error } = useOrders(slug)
 
   const report = useMemo(() => {
     const revenueOrders = orders.filter((order) => REVENUE_STATUSES.has(order.status))

@@ -1,4 +1,6 @@
 export { useStore } from './useStore'
+export { useInventory, inventoryKey } from './useInventory'
+export { useOrders, ordersKey } from './useOrders'
 export { useCanManageStore } from './useCanManageStore'
 export { useDebouncedValue } from './useDebouncedValue'
 export { useTheme } from './useTheme'

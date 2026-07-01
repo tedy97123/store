@@ -9,6 +9,7 @@ import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import StorePage from './pages/StorePage'
+import MassSearchPage from './pages/MassSearchPage'
 import CardDetailsPage from './pages/CardDetailsPage'
 import CustomerProfilePage from './pages/CustomerProfilePage'
 import StoreAdminPage from './pages/StoreAdminPage'
@@ -35,6 +36,7 @@ export default function App() {
             <Route element={<AppLayout />}>
               <Route index element={<HomePage />} />
               <Route path="s/:slug" element={<StorePage />} />
+              <Route path="s/:slug/mass-search" element={<MassSearchPage />} />
               <Route path="s/:slug/cards/:id" element={<CardDetailsPage />} />
               <Route
                 path="s/:slug/account"

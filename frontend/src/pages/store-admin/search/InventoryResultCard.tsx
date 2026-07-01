@@ -1,0 +1,99 @@
+import { Pencil, Sparkles, Trash2 } from 'lucide-react'
+import { cardImage, formatPrice, formatScryfallPrice } from '../../../api/client'
+import type { InventoryItem } from '../../../api/types'
+import { Badge, Button } from '../../../components/ui'
+import { FOIL_GRADIENT, rarityAccent } from '../../../lib/mtg'
+
+export interface InventoryResultCardProps {
+  item: InventoryItem
+  onEdit: () => void
+  onDelete: () => void
+  deleting: boolean
+}
+
+/** One listing tile in the store-inventory grid, with edit/remove actions. */
+export function InventoryResultCard({ item, onEdit, onDelete, deleting }: InventoryResultCardProps) {
+  const accent = rarityAccent(item.card.rarity)
+  const image = cardImage(item.card)
+  return (
+    <div className="group flex gap-4 rounded-card border border-border bg-surface p-4 shadow-card transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgb(16_24_40_/0.25)]">
+      <div className="relative h-32 w-[5.5rem] flex-shrink-0 overflow-hidden rounded-btn border-2" style={{ borderColor: accent }}>
+        {image ? (
+          <img src={image} alt={item.card.name} className="h-full w-full object-cover" />
+        ) : (
+          <div className="grid h-full place-items-center px-2 text-center text-xs text-fg-muted">No image</div>
+        )}
+        {item.isFoil && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-50 mix-blend-color-dodge"
+            style={{ backgroundImage: FOIL_GRADIENT, backgroundSize: '200% 200%' }}
+          />
+        )}
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="size-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: accent }} />
+              <h3 className="truncate font-display text-base font-bold tracking-tight text-fg">{item.card.name}</h3>
+            </div>
+            <p className="mt-0.5 text-xs uppercase tracking-wide text-fg-muted">
+              {item.card.setCode?.toUpperCase() ?? '-'} · #{item.card.collectorNumber ?? '-'}
+            </p>
+          </div>
+          <div className="flex flex-shrink-0 gap-1">
+            <Button variant="ghost" size="sm" onClick={onEdit} aria-label={`Edit ${item.card.name}`} title="Edit item">
+              <Pencil className="size-4" aria-hidden />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              loading={deleting}
+              aria-label={`Remove ${item.card.name}`}
+              title="Remove item"
+              className="text-danger-700"
+            >
+              <Trash2 className="size-4" aria-hidden />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Badge>{item.condition}</Badge>
+          {item.isFoil ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-white/60 px-2 py-0.5 text-[0.7rem] font-bold text-black/80"
+              style={{ backgroundImage: FOIL_GRADIENT }}
+            >
+              <Sparkles aria-hidden className="size-3" />
+              Foil
+            </span>
+          ) : (
+            <Badge tone="neutral">Nonfoil</Badge>
+          )}
+          <Badge tone="brand">{item.quantity} in stock</Badge>
+        </div>
+
+        {item.notes && <p className="mt-2 line-clamp-1 text-xs text-fg-muted">{item.notes}</p>}
+
+        <div className="mt-auto grid grid-cols-2 gap-3 pt-3 text-sm">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-fg-muted">Your price</p>
+            <p className="mt-0.5 font-display text-lg font-bold text-fg">{formatPrice(item.priceCents)}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-fg-muted">Market</p>
+            <p className="mt-0.5 font-display text-lg font-bold text-fg">
+              {formatScryfallPrice(item.card, item.isFoil ? 'foil' : 'nonfoil')}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default InventoryResultCard

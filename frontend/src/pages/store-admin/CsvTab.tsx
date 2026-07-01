@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { Upload } from 'lucide-react'
-import api, { cardImage } from '../../api/client'
+import api, { cardImage, extractErrorMessage } from '../../api/client'
+import { inventoryKey } from '../../hooks'
 import type { CsvImportJob, CsvImportJobSummary, CsvImportRow } from '../../api/types'
 import {
   Card,
@@ -17,7 +18,7 @@ import {
   EmptyRow,
   Badge,
 } from '../../components/ui'
-import { RunStatusBadge, isActive, rowMarketPrice } from './csv-shared'
+import { ImportStat, RunStatusBadge, isActive, rowMarketPrice } from './csv-shared'
 
 const REQUIRED_HEADERS = [
   'name',
@@ -30,10 +31,6 @@ const REQUIRED_HEADERS = [
   'variant',
   'collectorNumber',
 ]
-
-function uploadErrorMessage(error: { response?: { data?: { detail?: string } }; message?: string }): string {
-  return error.response?.data?.detail ?? error.message ?? 'Upload failed'
-}
 
 export default function CsvTab({ slug }: { slug: string }) {
   const queryClient = useQueryClient()
@@ -76,14 +73,12 @@ export default function CsvTab({ slug }: { slug: string }) {
       await queryClient.invalidateQueries({ queryKey: ['csv-import-current', slug] })
       await queryClient.invalidateQueries({ queryKey: ['csv-import-runs', slug] })
     },
-    onError: (err: { response?: { data?: { detail?: string } }; message?: string }) => {
-      setError(uploadErrorMessage(err))
-    },
+    onError: (err) => setError(extractErrorMessage(err, 'Upload failed')),
   })
 
   useEffect(() => {
     if (job?.status === 'completed') {
-      void queryClient.invalidateQueries({ queryKey: ['inventory', slug] })
+      void queryClient.invalidateQueries({ queryKey: inventoryKey(slug) })
     }
   }, [job?.status, queryClient, slug])
 
@@ -111,10 +106,10 @@ export default function CsvTab({ slug }: { slug: string }) {
         />
         <CardBody className="space-y-5">
           <div className="grid gap-3 md:grid-cols-4">
-            <Stat label="Rows" value={String(totalRows)} />
-            <Stat label="Processed" value={`${processedRows}/${totalRows || 0}`} />
-            <Stat label="Imported" value={`${importedCount}/${totalRows || 0}`} tone="success" />
-            <Stat label="Failed" value={String(failedCount)} tone="danger" />
+            <ImportStat label="Rows" value={String(totalRows)} />
+            <ImportStat label="Processed" value={`${processedRows}/${totalRows || 0}`} />
+            <ImportStat label="Imported" value={`${importedCount}/${totalRows || 0}`} tone="success" />
+            <ImportStat label="Failed" value={String(failedCount)} tone="danger" />
           </div>
 
           <div className="space-y-1.5">
@@ -314,13 +309,3 @@ function RowStatus({ row }: { row: CsvImportRow }) {
   return <Badge tone="neutral">Queued</Badge>
 }
 
-function Stat({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' }) {
-  const valueTone =
-    tone === 'success' ? 'text-success-700' : tone === 'danger' ? 'text-danger-700' : 'text-fg'
-  return (
-    <div className="rounded-card border border-border bg-bg p-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${valueTone}`}>{value}</p>
-    </div>
-  )
-}

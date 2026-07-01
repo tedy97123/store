@@ -35,3 +35,22 @@ export function rowMarketPrice(row: CsvImportRow): string {
   const cents = scryfallPriceCents(row.card, row.isFoil ? 'foil' : 'nonfoil')
   return cents === null ? '-' : formatPrice(cents)
 }
+
+/** Small metric tile (label + toned value) used in CSV import summaries. */
+export function ImportStat({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'success' | 'danger'
+}) {
+  const valueTone = tone === 'success' ? 'text-success-700' : tone === 'danger' ? 'text-danger-700' : 'text-fg'
+  return (
+    <div className="rounded-card border border-border bg-bg p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">{label}</p>
+      <p className={`mt-1 text-xl font-bold ${valueTone}`}>{value}</p>
+    </div>
+  )
+}

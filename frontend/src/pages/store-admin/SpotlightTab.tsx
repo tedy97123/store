@@ -1,21 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from 'lucide-react'
-import api, { formatPrice } from '../../api/client'
-import type { Store } from '../../api/types'
+import api, { formatPrice, parsePriceInput } from '../../api/client'
+import { useStore } from '../../hooks'
 import { Card, CardHeader, CardBody, Field, Input, Button } from '../../components/ui'
 
 export default function SpotlightTab({ slug }: { slug: string }) {
   const queryClient = useQueryClient()
   const [minPriceDollars, setMinPriceDollars] = useState('10.00')
 
-  const { data: store } = useQuery({
-    queryKey: ['store', slug],
-    queryFn: async () => {
-      const { data } = await api.get<Store>(`/stores/${slug}`)
-      return data
-    },
-  })
+  const { data: store } = useStore(slug)
 
   useEffect(() => {
     if (store?.spotlightMinPriceCents !== undefined) {
@@ -25,9 +19,8 @@ export default function SpotlightTab({ slug }: { slug: string }) {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      const parsed = Number(minPriceDollars.replace(/[$,\s]/g, ''))
       await api.patch(`/stores/${slug}/settings`, {
-        spotlightMinPriceCents: Number.isNaN(parsed) ? 0 : Math.max(0, Math.round(parsed * 100)),
+        spotlightMinPriceCents: Math.max(0, parsePriceInput(minPriceDollars) ?? 0),
       })
     },
     onSuccess: async () => {

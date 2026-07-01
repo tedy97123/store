@@ -1,0 +1,284 @@
+import { useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, CheckCircle2, ClipboardList, HelpCircle, Search, XCircle } from 'lucide-react'
+import { formatPrice, scryfallPriceCents } from '../api/client'
+import type { InventoryItem } from '../api/types'
+import { useInventory, useStore, useStoreTheme } from '../hooks'
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingPanel, Textarea } from '../components/ui'
+
+/** One parsed request line: how many copies of which card name. */
+interface RequestLine {
+  raw: string
+  name: string
+  quantity: number
+}
+
+type LineStatus = 'found' | 'partial' | 'missing'
+
+interface LineResult extends RequestLine {
+  status: LineStatus
+  /** Matching store listings, cheapest market price first. */
+  listings: InventoryItem[]
+  /** Copies the store can actually supply (≤ quantity). */
+  fillable: number
+  /** Cheapest-first cost of the fillable copies, in cents; null when unpriced. */
+  fillCents: number | null
+}
+
+/**
+ * Parse a pasted decklist. Accepts `4 Lightning Bolt`, `4x Lightning Bolt`, or
+ * a bare card name (quantity 1); blank lines and `#`/`//` comments are skipped,
+ * and a trailing `(SET) 123` printing hint is ignored. Duplicate names merge.
+ */
+function parseDecklist(text: string): RequestLine[] {
+  const byName = new Map<string, RequestLine>()
+  for (const rawLine of text.split('\n')) {
+    const raw = rawLine.trim()
+    if (!raw || raw.startsWith('#') || raw.startsWith('//')) continue
+    const counted = /^(\d+)\s*[xX]?\s+(.+)$/.exec(raw)
+    const quantity = counted ? Math.max(1, Number(counted[1])) : 1
+    const name = (counted ? counted[2] : raw).replace(/\s*\([A-Za-z0-9]{2,6}\)\s*[\w-]*\s*$/, '').trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    const existing = byName.get(key)
+    if (existing) existing.quantity += quantity
+    else byName.set(key, { raw, name, quantity })
+  }
+  return [...byName.values()]
+}
+
+function itemMarketCents(item: InventoryItem): number | null {
+  return scryfallPriceCents(item.card, item.isFoil ? 'foil' : 'nonfoil')
+}
+
+/** Match one request line against inventory and price a cheapest-first fill. */
+function matchLine(line: RequestLine, inventory: InventoryItem[]): LineResult {
+  const wanted = line.name.toLowerCase()
+  const listings = inventory
+    .filter((item) => {
+      const full = item.card.name.toLowerCase()
+      return full === wanted || full.split(' // ')[0].trim() === wanted
+    })
+    .sort((a, b) => (itemMarketCents(a) ?? Number.POSITIVE_INFINITY) - (itemMarketCents(b) ?? Number.POSITIVE_INFINITY))
+
+  let remaining = line.quantity
+  let fillCents: number | null = 0
+  for (const item of listings) {
+    if (remaining <= 0) break
+    const take = Math.min(remaining, item.quantity)
+    const cents = itemMarketCents(item)
+    if (fillCents !== null) fillCents = cents === null ? null : fillCents + cents * take
+    remaining -= take
+  }
+  const fillable = line.quantity - remaining
+
+  return {
+    ...line,
+    listings,
+    fillable,
+    fillCents: fillable > 0 ? fillCents : null,
+    status: fillable >= line.quantity ? 'found' : fillable > 0 ? 'partial' : 'missing',
+  }
+}
+
+const STATUS_META: Record<LineStatus, { label: string; tone: 'success' | 'warning' | 'danger'; icon: typeof CheckCircle2 }> = {
+  found: { label: 'In stock', tone: 'success', icon: CheckCircle2 },
+  partial: { label: 'Partial', tone: 'warning', icon: HelpCircle },
+  missing: { label: 'Not in stock', tone: 'danger', icon: XCircle },
+}
+
+const PLACEHOLDER = ['4 Lightning Bolt', '2x Counterspell', 'Sol Ring', '# lines starting with # are ignored'].join('\n')
+
+export default function MassSearchPage() {
+  const { slug = '' } = useParams()
+  const { data: store } = useStore(slug)
+  useStoreTheme(store)
+
+  const { data: inventory = [], isLoading } = useInventory(slug)
+
+  const [text, setText] = useState('')
+  const [submitted, setSubmitted] = useState<RequestLine[] | null>(null)
+
+  const results = useMemo(
+    () => (submitted ? submitted.map((line) => matchLine(line, inventory)) : null),
+    [submitted, inventory],
+  )
+
+  const summary = useMemo(() => {
+    if (!results) return null
+    const counts = { found: 0, partial: 0, missing: 0 } as Record<LineStatus, number>
+    let totalCents = 0
+    let priced = true
+    for (const r of results) {
+      counts[r.status] += 1
+      if (r.fillCents === null) {
+        if (r.fillable > 0) priced = false
+      } else {
+        totalCents += r.fillCents
+      }
+    }
+    return { counts, totalCents, priced }
+  }, [results])
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link to={`/s/${slug}`} className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline">
+          <ArrowLeft aria-hidden className="size-4" />
+          Back to {store?.name ?? 'store'}
+        </Link>
+      </div>
+
+      <div>
+        <h1 className="inline-flex items-center gap-3 font-display text-3xl font-bold tracking-tight text-fg">
+          <span className="grid size-10 place-items-center rounded-btn bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-sm">
+            <ClipboardList aria-hidden className="size-5" />
+          </span>
+          Mass Search
+        </h1>
+        <p className="mt-2 max-w-2xl text-fg-muted">
+          Paste a decklist or want list and see what {store?.name ?? 'this store'} has in stock — with an estimated
+          total at market prices.
+        </p>
+      </div>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[24rem_minmax(0,1fr)]">
+        {/* Input */}
+        <Card className="lg:sticky lg:top-20">
+          <CardHeader title="Your list" subtitle="One card per line. Quantities like “4x” are optional." />
+          <CardBody className="space-y-3">
+            <Textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={PLACEHOLDER}
+              rows={14}
+              className="font-mono text-sm"
+              aria-label="Card list"
+            />
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => setSubmitted(parseDecklist(text))} disabled={!text.trim() || isLoading}>
+                <Search aria-hidden className="size-4" />
+                Search list
+              </Button>
+              {submitted && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setText('')
+                    setSubmitted(null)
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Results */}
+        <div className="min-w-0 space-y-4">
+          {isLoading ? (
+            <LoadingPanel label="Loading inventory…" />
+          ) : !results ? (
+            <Card>
+              <CardBody>
+                <EmptyState
+                  icon={ClipboardList}
+                  title="Paste a list to get started"
+                  description="We’ll match every line against this store’s live inventory."
+                />
+              </CardBody>
+            </Card>
+          ) : results.length === 0 ? (
+            <Card>
+              <CardBody>
+                <EmptyState icon={Search} title="Nothing to search" description="No card names found in your list." />
+              </CardBody>
+            </Card>
+          ) : (
+            <>
+              {/* Summary strip */}
+              {summary && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-card">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge tone="success">{summary.counts.found} in stock</Badge>
+                    <Badge tone="warning">{summary.counts.partial} partial</Badge>
+                    <Badge tone="danger">{summary.counts.missing} missing</Badge>
+                  </div>
+                  <p className="text-sm text-fg-muted">
+                    Estimated total{' '}
+                    <span className="font-display text-xl font-bold text-fg">
+                      {formatPrice(summary.totalCents)}
+                      {summary.priced ? '' : '+'}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {results.map((result) => (
+                  <ResultRow key={result.name.toLowerCase()} result={result} slug={slug} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ResultRow({ result, slug }: { result: LineResult; slug: string }) {
+  const meta = STATUS_META[result.status]
+  const Icon = meta.icon
+  const best = result.listings[0]
+
+  return (
+    <div className="rounded-card border border-border bg-surface p-4 shadow-card">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon
+            aria-hidden
+            className={`size-5 flex-shrink-0 ${
+              meta.tone === 'success' ? 'text-success-700' : meta.tone === 'warning' ? 'text-warning-700' : 'text-danger-700'
+            }`}
+          />
+          <div className="min-w-0">
+            {best ? (
+              <Link to={`/s/${slug}/cards/${best.id}`} className="truncate font-bold text-fg hover:text-brand-600 hover:underline">
+                {best.card.name}
+              </Link>
+            ) : (
+              <p className="truncate font-bold text-fg">{result.name}</p>
+            )}
+            <p className="text-xs text-fg-muted">
+              {result.quantity} requested · {result.fillable} available
+              {result.fillCents !== null ? ` · ${formatPrice(result.fillCents)}` : ''}
+            </p>
+          </div>
+        </div>
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+      </div>
+
+      {result.listings.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+          {result.listings.map((item) => {
+            const cents = itemMarketCents(item)
+            return (
+              <Link
+                key={item.id}
+                to={`/s/${slug}/cards/${item.id}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-fg-muted transition-colors hover:border-brand-500 hover:text-brand-600"
+              >
+                <span className="font-bold text-fg">{item.card.setCode?.toUpperCase() ?? '—'}</span>
+                {item.condition}
+                {item.isFoil ? ' · Foil' : ''} · {item.quantity} in stock
+                {cents !== null ? ` · ${formatPrice(cents)}` : ''}
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
