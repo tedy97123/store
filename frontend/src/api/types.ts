@@ -36,6 +36,29 @@ export interface Store {
   createdAt?: string
 }
 
+export interface StorePaymentAccount {
+  provider: 'square'
+  status: 'connected' | 'disconnected' | 'error'
+  environment: 'sandbox' | 'production' | string
+  merchantId?: string | null
+  locationId?: string | null
+  scopes: string[]
+  tokenExpiresAt?: string | null
+  connectedAt?: string | null
+  disconnectedAt?: string | null
+  lastError?: string | null
+}
+
+export interface StorePaymentStatus {
+  square: StorePaymentAccount | null
+}
+
+export interface SquareConnectResponse {
+  authorizationUrl: string
+  environment: 'sandbox' | 'production' | string
+  scopes: string[]
+}
+
 export interface CardFace {
   name?: string
   imageUrl?: string
