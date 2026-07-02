@@ -15,6 +15,9 @@ export function useStore(slug?: string) {
       return data
     },
     enabled: !!slug,
+    // Store branding/settings rarely change while browsing — avoid refetching it
+    // on every store-scoped page navigation.
+    staleTime: 5 * 60 * 1000,
   })
 }
 

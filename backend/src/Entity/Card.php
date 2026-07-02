@@ -532,7 +532,7 @@ class Card
     #[Groups(['card:read', 'inventory:read'])]
     public function getImageUrl(): ?string
     {
-        $topLevel = $this->imageUris['normal'] ?? $this->imageUris['small'] ?? null;
+        $topLevel = $this->imageUris['large'] ?? $this->imageUris['normal'] ?? $this->imageUris['small'] ?? null;
         if (null !== $topLevel) {
             return $topLevel;
         }
@@ -575,7 +575,7 @@ class Card
             $result[] = [
                 'name' => isset($face['name']) ? (string) $face['name'] : null,
                 'imageUris' => $imageUris,
-                'imageUrl' => $imageUris['normal'] ?? $imageUris['small'] ?? null,
+                'imageUrl' => $imageUris['large'] ?? $imageUris['normal'] ?? $imageUris['small'] ?? null,
                 'manaCost' => isset($face['mana_cost']) ? (string) $face['mana_cost'] : null,
                 'typeLine' => isset($face['type_line']) ? (string) $face['type_line'] : null,
                 'oracleText' => isset($face['oracle_text']) ? (string) $face['oracle_text'] : null,

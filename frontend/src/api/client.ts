@@ -63,15 +63,17 @@ export function unwrapCollection<T>(data: T[] | { member?: T[] }): T[] {
 
 export function cardImage(card: {
   imageUrl?: string
-  imageUris?: { normal?: string; small?: string }
-  cardFaces?: { imageUrl?: string; imageUris?: { normal?: string; small?: string } }[]
+  imageUris?: { png?: string; large?: string; normal?: string; small?: string }
+  cardFaces?: { imageUrl?: string; imageUris?: { png?: string; large?: string; normal?: string; small?: string } }[]
 }): string | undefined {
   const front = card.cardFaces?.[0]
   return (
     card.imageUrl ??
+    card.imageUris?.large ??
     card.imageUris?.normal ??
     card.imageUris?.small ??
     front?.imageUrl ??
+    front?.imageUris?.large ??
     front?.imageUris?.normal ??
     front?.imageUris?.small
   )

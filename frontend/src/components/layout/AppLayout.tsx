@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useMatch } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { useTheme } from '../../hooks'
+import { useCustomerCart, useTheme } from '../../hooks'
 import { Avatar, Button, buttonVariants } from '../ui'
-import { ChevronDown, LogIn, LogOut, Menu, Moon, Store, Sun, UserCircle, UserPlus, X } from 'lucide-react'
+import { ChevronDown, LogIn, LogOut, Menu, Moon, ShoppingCart, Store, Sun, UserCircle, UserPlus, X } from 'lucide-react'
 
 export default function AppLayout() {
   const { user, logout, isSuperAdmin } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const ownedStores = user?.ownedStores ?? []
-  // The customer profile is per-store, so only surface an "Account" link when the
-  // current route is within a store (e.g. /s/:slug, /s/:slug/cards/:id).
+  // The customer profile + cart are per-store, so only surface those links when
+  // the current route is within a store (e.g. /s/:slug, /s/:slug/cards/:id).
   const storeMatch = useMatch('/s/:slug/*')
   const storeSlug = storeMatch?.params.slug
+
+  // Live cart count for the active store, so the navbar badge stays in sync.
+  const { data: cart = [] } = useCustomerCart(storeSlug ?? '', Boolean(user && storeSlug))
+  const cartCount = cart.reduce((total, entry) => total + entry.quantity, 0)
+  const cartBadge = cartCount > 99 ? '99+' : String(cartCount)
   const location = useLocation()
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [storeMenuOpen, setStoreMenuOpen] = useState(false)
@@ -57,6 +62,23 @@ export default function AppLayout() {
     >
       {theme === 'dark' ? <Sun aria-hidden className="size-4" /> : <Moon aria-hidden className="size-4" />}
     </button>
+  )
+
+  // Persistent, always-visible cart affordance (top-right) for the active store.
+  const cartLink = user && storeSlug && (
+    <Link
+      to={`/s/${storeSlug}/cart`}
+      aria-label={cartCount > 0 ? `Cart, ${cartCount} item${cartCount === 1 ? '' : 's'}` : 'Cart'}
+      title="Cart"
+      className="relative grid size-9 place-items-center rounded-btn border border-border bg-surface text-fg-muted transition-colors hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+    >
+      <ShoppingCart aria-hidden className="size-4" />
+      {cartCount > 0 && (
+        <span className="absolute -right-1.5 -top-1.5 grid h-[1.15rem] min-w-[1.15rem] place-items-center rounded-full bg-brand-500 px-1 text-[0.65rem] font-bold leading-none text-white ring-2 ring-surface">
+          {cartBadge}
+        </span>
+      )}
+    </Link>
   )
 
   return (
@@ -183,6 +205,9 @@ export default function AppLayout() {
               </>
             )}
           </nav>
+
+          {/* Cart — always visible top-right when inside a store */}
+          {cartLink}
 
           {/* Theme toggle (desktop) */}
           <div className="hidden md:block">{themeToggle}</div>

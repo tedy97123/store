@@ -1,9 +1,9 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Heart, ImageOff, Palette, Search } from 'lucide-react'
+import { Heart, ImageOff, LayoutGrid, Palette, Rows3, Search, ShoppingCart, type LucideIcon } from 'lucide-react'
 import api, { httpStatus } from '../../api/client'
-import type { ApiError, Store } from '../../api/types'
+import type { ApiError, CardDisplayStyle, Store } from '../../api/types'
 import { useStore } from '../../hooks'
 import { Badge, Button, Card, CardBody, CardHeader, Field, FilterPill, Input, Textarea } from '../../components/ui'
 import { StoreHero, DEFAULT_PRIMARY, DEFAULT_ACCENT } from '../../components/store/StoreHero'
@@ -37,6 +37,7 @@ interface BrandingForm {
   heroHeading: string
   heroSubheading: string
   tagline: string
+  cardDisplayStyle: CardDisplayStyle
 }
 
 const EMPTY: BrandingForm = {
@@ -52,6 +53,7 @@ const EMPTY: BrandingForm = {
   heroHeading: '',
   heroSubheading: '',
   tagline: '',
+  cardDisplayStyle: 'gallery',
 }
 
 function fromStore(store: Store): BrandingForm {
@@ -68,6 +70,7 @@ function fromStore(store: Store): BrandingForm {
     heroHeading: store.heroHeading ?? '',
     heroSubheading: store.heroSubheading ?? '',
     tagline: store.tagline ?? '',
+    cardDisplayStyle: store.cardDisplayStyle ?? 'gallery',
   }
 }
 
@@ -118,10 +121,14 @@ export default function BrandingTab({ slug }: { slug: string }) {
   const queryClient = useQueryClient()
   const { data: store, isLoading } = useStore(slug)
   const [form, setForm] = useState<BrandingForm>(EMPTY)
+  const [loadedSlug, setLoadedSlug] = useState<string | null>(null)
 
   useEffect(() => {
-    if (store) setForm(fromStore(store))
-  }, [store])
+    if (store && store.slug !== loadedSlug) {
+      setForm(fromStore(store))
+      setLoadedSlug(store.slug)
+    }
+  }, [loadedSlug, store])
 
   const set = <K extends keyof BrandingForm>(key: K, value: BrandingForm[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -133,10 +140,44 @@ export default function BrandingTab({ slug }: { slug: string }) {
       const { data } = await api.patch<Store>(`/stores/${slug}/settings`, form)
       return data
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      queryClient.setQueryData<Store>(['store', slug], (current) => ({ ...current, ...saved }))
       await queryClient.invalidateQueries({ queryKey: ['store', slug] })
     },
   })
+
+  const displayMutation = useMutation({
+    mutationFn: async (cardDisplayStyle: CardDisplayStyle) => {
+      const { data } = await api.patch<Store>(`/stores/${slug}/settings`, { cardDisplayStyle })
+      return data
+    },
+    onMutate: async (cardDisplayStyle) => {
+      await queryClient.cancelQueries({ queryKey: ['store', slug] })
+      const previous = queryClient.getQueryData<Store>(['store', slug])
+      queryClient.setQueryData<Store>(['store', slug], (current) =>
+        current ? { ...current, cardDisplayStyle } : current,
+      )
+      return { previous }
+    },
+    onError: (_error, _cardDisplayStyle, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['store', slug], context.previous)
+        set('cardDisplayStyle', context.previous.cardDisplayStyle ?? 'gallery')
+      }
+    },
+    onSuccess: (saved, cardDisplayStyle) => {
+      queryClient.setQueryData<Store>(['store', slug], (current) => ({
+        ...current,
+        ...saved,
+        cardDisplayStyle,
+      }))
+    },
+  })
+
+  function chooseCardDisplayStyle(cardDisplayStyle: CardDisplayStyle) {
+    set('cardDisplayStyle', cardDisplayStyle)
+    displayMutation.mutate(cardDisplayStyle)
+  }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -163,6 +204,38 @@ export default function BrandingTab({ slug }: { slug: string }) {
                 </button>
               ))}
             </div>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Card display"
+            subtitle="Choose how inventory cards appear on your public storefront."
+            actions={
+              <DisplaySaveStatus
+                saving={displayMutation.isPending}
+                saved={displayMutation.isSuccess}
+                error={displayMutation.isError}
+              />
+            }
+          />
+          <CardBody className="grid gap-3 md:grid-cols-2">
+            <DisplayChoice
+              icon={LayoutGrid}
+              title="Gallery"
+              description="Current image-forward cards with the existing grid and list views."
+              selected={form.cardDisplayStyle === 'gallery'}
+              disabled={displayMutation.isPending}
+              onClick={() => chooseCardDisplayStyle('gallery')}
+            />
+            <DisplayChoice
+              icon={Rows3}
+              title="Marketplace compact"
+              description="Dense horizontal cards like the reference, with pricing and add-to-cart visible."
+              selected={form.cardDisplayStyle === 'marketplace'}
+              disabled={displayMutation.isPending}
+              onClick={() => chooseCardDisplayStyle('marketplace')}
+            />
           </CardBody>
         </Card>
 
@@ -272,25 +345,46 @@ function StorePreview({ form, storeName }: { form: BrandingForm; storeName: stri
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {[1, 2].map((n) => (
-          <div key={n} className="rounded-card border border-border bg-surface p-3 shadow-card">
-            <div className="grid h-20 place-items-center rounded-btn bg-bg text-fg-muted">
-              <ImageOff aria-hidden className="size-5" />
+      <div className={form.cardDisplayStyle === 'marketplace' ? 'grid gap-3' : 'grid grid-cols-2 gap-3'}>
+        {[1, 2].map((n) =>
+          form.cardDisplayStyle === 'marketplace' ? (
+            <div key={n} className="flex gap-3 rounded-card border border-border bg-surface p-3 shadow-card">
+              <div className="grid h-24 w-16 shrink-0 place-items-center rounded-btn bg-bg text-fg-muted">
+                <ImageOff aria-hidden className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-fg">Sample Card {n}</p>
+                <p className="mt-1 text-xs text-fg-muted">Preview Set</p>
+                <p className="mt-2 text-xs text-fg">3 copies from</p>
+                <p className="font-display text-lg font-bold text-fg">${(n * 1.53).toFixed(2)}</p>
+                <p className="text-xs font-bold text-fg">
+                  Market Price: <span className="text-success-700">${(n * 1.86).toFixed(2)}</span>
+                </p>
+              </div>
             </div>
-            <p className="mt-2 truncate text-sm font-bold text-brand-600">Sample Card {n}</p>
-            <div className="mt-1 flex items-center justify-between">
-              <Badge tone={n === 1 ? 'brand' : 'neutral'}>{n === 1 ? 'Foil' : 'NM'}</Badge>
-              <span className="text-sm font-bold text-fg">${(n * 1.53).toFixed(2)}</span>
+          ) : (
+            <div key={n} className="rounded-card border border-border bg-surface p-3 shadow-card">
+              <div className="grid h-20 place-items-center rounded-btn bg-bg text-fg-muted">
+                <ImageOff aria-hidden className="size-5" />
+              </div>
+              <p className="mt-2 truncate text-sm font-bold text-brand-600">Sample Card {n}</p>
+              <div className="mt-1 flex items-center justify-between">
+                <Badge tone={n === 1 ? 'brand' : 'neutral'}>{n === 1 ? 'Foil' : 'NM'}</Badge>
+                <span className="text-sm font-bold text-fg">${(n * 1.53).toFixed(2)}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
       </div>
 
       <div className="flex items-center gap-3">
         <Button className="flex-1">
-          <Heart aria-hidden className="size-4" />
-          Save favorite
+          {form.cardDisplayStyle === 'marketplace' ? (
+            <ShoppingCart aria-hidden className="size-4" />
+          ) : (
+            <Heart aria-hidden className="size-4" />
+          )}
+          {form.cardDisplayStyle === 'marketplace' ? 'Add to cart' : 'Save favorite'}
         </Button>
         <Button variant="secondary" className="flex-1">
           Add to want list
@@ -298,6 +392,57 @@ function StorePreview({ form, storeName }: { form: BrandingForm; storeName: stri
       </div>
     </div>
   )
+}
+
+function DisplayChoice({
+  icon: Icon,
+  title,
+  description,
+  selected,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon
+  title: string
+  description: string
+  selected: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      disabled={disabled}
+      className={`flex gap-3 rounded-card border p-4 text-left transition-colors ${
+        selected ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-border bg-surface text-fg hover:border-brand-500'
+      } disabled:cursor-not-allowed disabled:opacity-70`}
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-btn bg-surface text-brand-600">
+        <Icon aria-hidden className="size-5" />
+      </span>
+      <span>
+        <span className="block font-display text-base font-bold">{title}</span>
+        <span className={`mt-1 block text-sm ${selected ? 'text-brand-700' : 'text-fg-muted'}`}>{description}</span>
+      </span>
+    </button>
+  )
+}
+
+function DisplaySaveStatus({
+  saving,
+  saved,
+  error,
+}: {
+  saving: boolean
+  saved: boolean
+  error: boolean
+}) {
+  if (saving) return <span className="text-xs font-bold text-fg-muted">Saving...</span>
+  if (error) return <span className="text-xs font-bold text-danger-700">Not saved</span>
+  if (saved) return <span className="text-xs font-bold text-success-700">Saved</span>
+  return null
 }
 
 function readError(error: unknown): string {

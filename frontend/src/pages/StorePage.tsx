@@ -9,6 +9,7 @@ import {
   List as ListIcon,
   Package,
   Search,
+  ShoppingCart,
   SlidersHorizontal,
   Sparkles,
   Store as StoreIcon,
@@ -19,9 +20,9 @@ import {
 import { formatPrice, parsePriceInput, scryfallPriceCents } from '../api/client'
 import type { InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
-import { useCanManageStore, useInventory, useStore, useStoreTheme } from '../hooks'
+import { useCanManageStore, useCart, useInventory, useStore, useStoreTheme } from '../hooks'
 import { Button, buttonVariants, EmptyState, Input, LoadingPanel, Pagination, Select } from '../components/ui'
-import { CardRow, CardTile, SpotlightCard } from '../components/cards'
+import { CardRow, CardTile, MarketplaceCard, SpotlightCard } from '../components/cards'
 import { StoreHero } from '../components/store/StoreHero'
 import { cx } from '../lib/cx'
 import { MANA_COLORS } from '../lib/mtg'
@@ -96,8 +97,17 @@ export default function StorePage() {
 
   const { data: store } = useStore(slug)
   useStoreTheme(store)
+  const cardDisplayStyle = store?.cardDisplayStyle ?? 'gallery'
 
   const { data: inventory = [], isLoading } = useInventory(slug)
+  const { query: cartQuery, setItem: cartSetItem } = useCart(slug, Boolean(user))
+  const cartByItemId = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const entry of cartQuery.data ?? []) {
+      map.set(entry.inventoryItem.id, entry.quantity)
+    }
+    return map
+  }, [cartQuery.data])
 
   const availableSets = useMemo(
     () => Array.from(new Set(inventory.map((item) => item.card.setCode).filter(Boolean))).sort(),
@@ -482,26 +492,33 @@ export default function StorePage() {
                   </option>
                 ))}
               </Select>
-              <div className="flex overflow-hidden rounded-btn border border-border">
-                <button
-                  type="button"
-                  onClick={() => setView('grid')}
-                  aria-label="Grid view"
-                  aria-pressed={view === 'grid'}
-                  className={cx('grid size-10 place-items-center', view === 'grid' ? 'bg-brand-50 text-brand-700' : 'bg-surface text-fg-muted hover:text-fg')}
-                >
-                  <LayoutGrid aria-hidden className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setView('list')}
-                  aria-label="List view"
-                  aria-pressed={view === 'list'}
-                  className={cx('grid size-10 place-items-center border-l border-border', view === 'list' ? 'bg-brand-50 text-brand-700' : 'bg-surface text-fg-muted hover:text-fg')}
-                >
-                  <ListIcon aria-hidden className="size-4" />
-                </button>
-              </div>
+              {cardDisplayStyle === 'gallery' ? (
+                <div className="flex overflow-hidden rounded-btn border border-border">
+                  <button
+                    type="button"
+                    onClick={() => setView('grid')}
+                    aria-label="Grid view"
+                    aria-pressed={view === 'grid'}
+                    className={cx('grid size-10 place-items-center', view === 'grid' ? 'bg-brand-50 text-brand-700' : 'bg-surface text-fg-muted hover:text-fg')}
+                  >
+                    <LayoutGrid aria-hidden className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setView('list')}
+                    aria-label="List view"
+                    aria-pressed={view === 'list'}
+                    className={cx('grid size-10 place-items-center border-l border-border', view === 'list' ? 'bg-brand-50 text-brand-700' : 'bg-surface text-fg-muted hover:text-fg')}
+                  >
+                    <ListIcon aria-hidden className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <span className="inline-flex h-10 items-center gap-2 rounded-btn border border-border bg-brand-50 px-3 text-sm font-bold text-brand-700">
+                  <ShoppingCart aria-hidden className="size-4" />
+                  Marketplace cards
+                </span>
+              )}
             </div>
           </div>
 
@@ -522,7 +539,21 @@ export default function StorePage() {
             </div>
           ) : (
             <div className="space-y-6">
-              {view === 'grid' ? (
+              {cardDisplayStyle === 'marketplace' ? (
+                <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                  {visibleResults.map((item) => (
+                    <MarketplaceCard
+                      key={item.id}
+                      item={item}
+                      slug={slug}
+                      signedIn={Boolean(user)}
+                      inCartQuantity={cartByItemId.get(item.id)}
+                      adding={cartSetItem.isPending && cartSetItem.variables?.item.id === item.id}
+                      onAddToCart={() => cartSetItem.mutate({ item, quantity: 1 })}
+                    />
+                  ))}
+                </div>
+              ) : view === 'grid' ? (
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                   {visibleResults.map((item) => (
                     <CardTile key={item.id} item={item} slug={slug} />

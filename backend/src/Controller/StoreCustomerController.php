@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\Card;
+use App\Entity\CartItem;
 use App\Entity\CustomerFavorite;
 use App\Entity\CustomerWantListEntry;
 use App\Entity\InventoryItem;
@@ -10,6 +11,7 @@ use App\Entity\Store;
 use App\Entity\StoreCustomer;
 use App\Entity\User;
 use App\Repository\CardRepository;
+use App\Repository\CartItemRepository;
 use App\Repository\CustomerFavoriteRepository;
 use App\Repository\CustomerWantListEntryRepository;
 use App\Repository\InventoryItemRepository;
@@ -31,6 +33,7 @@ final class StoreCustomerController extends AbstractController
         private readonly StoreCustomerRepository $customerRepository,
         private readonly CustomerFavoriteRepository $favoriteRepository,
         private readonly CustomerWantListEntryRepository $wantListRepository,
+        private readonly CartItemRepository $cartRepository,
         private readonly InventoryItemRepository $inventoryRepository,
         private readonly CardRepository $cardRepository,
         private readonly EntityManagerInterface $entityManager,
@@ -222,6 +225,117 @@ final class StoreCustomerController extends AbstractController
         return $this->json(null, 204);
     }
 
+    #[Route('/cart', name: 'api_store_customer_cart', methods: ['GET'])]
+    public function cart(string $slug): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        // Read-only: no customer row yet means an empty cart.
+        $customer = $this->findCustomer($store);
+        if (!$customer instanceof StoreCustomer) {
+            return $this->json([]);
+        }
+
+        return $this->json(array_map(
+            $this->serializeCartItem(...),
+            $this->cartRepository->findForCustomer($customer),
+        ));
+    }
+
+    /**
+     * Upsert a cart line. Body: {"quantity": n}. Quantity is clamped to the
+     * listing's available stock; 0 (or less) removes the line. Adding without a
+     * body defaults to quantity 1.
+     */
+    #[Route('/cart/{itemId}', name: 'api_store_customer_cart_set', methods: ['PUT'])]
+    public function setCartItem(Request $request, string $slug, int $itemId): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $customer = $this->getOrCreateCustomer($store);
+
+        $item = $this->findStoreItem($customer, $itemId);
+        if (!$item instanceof InventoryItem) {
+            return $this->json(['detail' => 'Inventory item not found.'], 404);
+        }
+
+        $payload = $this->jsonPayload($request);
+        $requested = (int) ($payload['quantity'] ?? 1);
+
+        $entry = $this->cartRepository->findOneForCustomerAndItem($customer, $item);
+
+        if ($requested <= 0) {
+            if ($entry instanceof CartItem) {
+                $this->entityManager->remove($entry);
+                $this->entityManager->flush();
+            }
+
+            return $this->json(null, 204);
+        }
+
+        if ($item->getQuantity() < 1) {
+            return $this->json(['detail' => 'This listing is out of stock.'], 422);
+        }
+
+        $isNew = !$entry instanceof CartItem;
+        if ($isNew) {
+            $entry = (new CartItem())->setCustomer($customer)->setInventoryItem($item);
+            $this->entityManager->persist($entry);
+        }
+
+        $entry->setQuantity(min($requested, $item->getQuantity()));
+        $this->entityManager->flush();
+
+        return $this->json($this->serializeCartItem($entry), $isNew ? 201 : 200);
+    }
+
+    #[Route('/cart/{itemId}', name: 'api_store_customer_cart_remove', methods: ['DELETE'])]
+    public function removeCartItem(string $slug, int $itemId): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        // No customer row means nothing to remove — no-op without persisting.
+        $customer = $this->findCustomer($store);
+        $item = $customer instanceof StoreCustomer ? $this->findStoreItem($customer, $itemId) : null;
+        if ($customer instanceof StoreCustomer && $item instanceof InventoryItem) {
+            $entry = $this->cartRepository->findOneForCustomerAndItem($customer, $item);
+            if ($entry instanceof CartItem) {
+                $this->entityManager->remove($entry);
+                $this->entityManager->flush();
+            }
+        }
+
+        return $this->json(null, 204);
+    }
+
+    #[Route('/cart', name: 'api_store_customer_cart_clear', methods: ['DELETE'])]
+    public function clearCart(string $slug): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $customer = $this->findCustomer($store);
+        if ($customer instanceof StoreCustomer) {
+            foreach ($this->cartRepository->findForCustomer($customer) as $entry) {
+                $this->entityManager->remove($entry);
+            }
+            $this->entityManager->flush();
+        }
+
+        return $this->json(null, 204);
+    }
+
     private function resolveStore(string $slug): ?Store
     {
         if (!$this->getUser() instanceof User) {
@@ -376,6 +490,18 @@ final class StoreCustomerController extends AbstractController
             'quantity' => $entry->getQuantity(),
             'notes' => $entry->getNotes(),
             'createdAt' => $entry->getCreatedAt()->format(DATE_ATOM),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeCartItem(CartItem $entry): array
+    {
+        return [
+            'id' => $entry->getId(),
+            'quantity' => $entry->getQuantity(),
+            'inventoryItem' => $this->serializeInventoryItem($entry->getInventoryItem()),
+            'createdAt' => $entry->getCreatedAt()->format(DATE_ATOM),
+            'updatedAt' => $entry->getUpdatedAt()->format(DATE_ATOM),
         ];
     }
 

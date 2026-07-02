@@ -4,6 +4,9 @@ export type { CardTileProps } from './CardTile'
 export { CardRow } from './CardRow'
 export type { CardRowProps } from './CardRow'
 
+export { MarketplaceCard } from './MarketplaceCard'
+export type { MarketplaceCardProps } from './MarketplaceCard'
+
 export { InteractiveCard } from './InteractiveCard'
 export type { InteractiveCardProps } from './InteractiveCard'
 

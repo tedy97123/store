@@ -54,6 +54,10 @@ class StoreCustomer
     #[ORM\OneToMany(mappedBy: 'customer', targetEntity: CustomerWantListEntry::class, orphanRemoval: true)]
     private Collection $wantListEntries;
 
+    /** @var Collection<int, CartItem> */
+    #[ORM\OneToMany(mappedBy: 'customer', targetEntity: CartItem::class, orphanRemoval: true)]
+    private Collection $cartItems;
+
     public function __construct()
     {
         $now = new \DateTimeImmutable();
@@ -61,6 +65,7 @@ class StoreCustomer
         $this->updatedAt = $now;
         $this->favorites = new ArrayCollection();
         $this->wantListEntries = new ArrayCollection();
+        $this->cartItems = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -177,6 +182,12 @@ class StoreCustomer
     public function getWantListEntries(): Collection
     {
         return $this->wantListEntries;
+    }
+
+    /** @return Collection<int, CartItem> */
+    public function getCartItems(): Collection
+    {
+        return $this->cartItems;
     }
 
     public function touch(): void

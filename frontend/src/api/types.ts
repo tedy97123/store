@@ -5,6 +5,8 @@ export interface ApiError {
   }
 }
 
+export type CardDisplayStyle = 'gallery' | 'marketplace'
+
 export interface Store {
   id: number
   name: string
@@ -25,6 +27,7 @@ export interface Store {
   heroHeading?: string | null
   heroSubheading?: string | null
   tagline?: string | null
+  cardDisplayStyle?: CardDisplayStyle
   owner?: {
     id: number
     email: string
@@ -126,6 +129,14 @@ export interface CustomerFavorite {
   id: number
   inventoryItem: InventoryItem
   createdAt: string
+}
+
+export interface CartItem {
+  id: number
+  quantity: number
+  inventoryItem: InventoryItem
+  createdAt: string
+  updatedAt: string
 }
 
 export interface CustomerWantListEntry {
