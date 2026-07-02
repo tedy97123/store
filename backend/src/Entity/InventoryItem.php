@@ -25,7 +25,15 @@ use Symfony\Component\Validator\Constraints as Assert;
             uriVariables: [
                 'slug' => new Link(fromClass: Store::class, identifiers: ['slug']),
             ],
-            normalizationContext: ['groups' => ['inventory:read']],
+            // The storefront list only needs enough to render tiles, filter, and
+            // sort. Heavy detail-only fields (full image set, legalities, flavor
+            // text, per-face data, scryfall link) are dropped here to keep the
+            // whole-inventory payload small — the item endpoint below still
+            // serves them in full for the card details page.
+            normalizationContext: [
+                'groups' => ['inventory:read'],
+                'ignored_attributes' => ['imageUris', 'legalities', 'flavorText', 'cardFaces', 'scryfallUri'],
+            ],
             provider: \App\State\StoreInventoryCollectionProvider::class,
         ),
         new Get(

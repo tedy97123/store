@@ -13,6 +13,10 @@ export function useInventory(slug: string) {
   return useQuery({
     queryKey: inventoryKey(slug),
     enabled: Boolean(slug),
+    // Inventory is a large payload and rarely changes mid-session; keep it fresh
+    // for a few minutes so moving between the storefront, a card's details, and
+    // the cart reuses the cache instead of refetching the whole list each time.
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const { data } = await api.get(`/stores/${slug}/inventory`)
       return unwrapCollection<InventoryItem>(data)

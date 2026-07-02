@@ -16,6 +16,7 @@ final readonly class StoreSettingsUpdater
 {
     private const HEX = '/^#[0-9a-fA-F]{6}$/';
     private const URL = '#^(https?://|/)#';
+    private const CARD_DISPLAY_STYLES = ['gallery', 'marketplace'];
 
     /** Branding color fields → entity setter. */
     private const COLOR_FIELDS = [
@@ -58,6 +59,14 @@ final readonly class StoreSettingsUpdater
     {
         if (array_key_exists('spotlightMinPriceCents', $payload)) {
             $store->setSpotlightMinPriceCents(max(0, (int) $payload['spotlightMinPriceCents']));
+        }
+
+        if (array_key_exists('cardDisplayStyle', $payload)) {
+            $style = $this->stringValue($payload['cardDisplayStyle']);
+            if (!in_array($style, self::CARD_DISPLAY_STYLES, true)) {
+                throw new \InvalidArgumentException('cardDisplayStyle must be gallery or marketplace.');
+            }
+            $store->setCardDisplayStyle($style);
         }
 
         foreach (self::COLOR_FIELDS as $key => $setter) {
@@ -121,6 +130,7 @@ final readonly class StoreSettingsUpdater
             'heroHeading' => $store->getHeroHeading(),
             'heroSubheading' => $store->getHeroSubheading(),
             'tagline' => $store->getTagline(),
+            'cardDisplayStyle' => $store->getCardDisplayStyle(),
         ];
     }
 

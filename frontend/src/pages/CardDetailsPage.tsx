@@ -13,12 +13,13 @@ import {
   Sparkles,
   UserCircle,
 } from 'lucide-react'
-import api, { cardImage, formatScryfallPrice } from '../api/client'
+import api, { cardImage, formatPrice, formatScryfallPrice } from '../api/client'
 import type { CardFace, CustomerFavorite, InventoryItem } from '../api/types'
 import { useAuth } from '../context/AuthContext'
 import {
   customerKeys,
   useCanManageStore,
+  useCart,
   useCustomerFavorites,
   useCustomerWantList,
   useInventory,
@@ -83,6 +84,7 @@ export default function CardDetailsPage() {
 
   const { data: favorites = [] } = useCustomerFavorites(slug, Boolean(user))
   const { data: wantList = [] } = useCustomerWantList(slug, Boolean(user))
+  const { query: cartQuery, setItem: cartSetItem } = useCart(slug, Boolean(user))
 
   const favoriteMutation = useMutation({
     mutationFn: async ({ inventoryItem, favorite }: { inventoryItem: InventoryItem; favorite: boolean }) => {
@@ -178,6 +180,10 @@ export default function CardDetailsPage() {
       entry.card?.id === item.card.id ||
       (entry.cardName.toLowerCase() === item.card.name.toLowerCase() && entry.setCode === item.card.setCode),
   )
+
+  const cartEntry = (cartQuery.data ?? []).find((entry) => entry.inventoryItem.id === item.id)
+  const inCart = Boolean(cartEntry)
+  const outOfStock = item.quantity < 1
 
   const related = inventory.filter((i) => i.id !== item.id).slice(0, 10)
 
@@ -303,10 +309,13 @@ export default function CardDetailsPage() {
           {/* Buy box */}
           <div className="rounded-card border border-border bg-surface p-5 shadow-card">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">Market price</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">Store price</p>
               <Badge tone={item.isFoil ? 'brand' : 'neutral'}>{item.isFoil ? 'Foil' : 'Nonfoil'}</Badge>
             </div>
-            <p className="mt-1 font-display text-4xl font-bold text-fg">{formatScryfallPrice(card, finish)}</p>
+            <p className="mt-1 font-display text-4xl font-bold text-fg">{formatPrice(item.priceCents)}</p>
+            <p className="mt-1 text-sm font-bold text-fg">
+              Market price: <span className="text-success-700">{formatScryfallPrice(card, finish)}</span>
+            </p>
 
             <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4">
               <Fact label="Condition" value={item.condition} />
@@ -318,8 +327,26 @@ export default function CardDetailsPage() {
             <div className="mt-5 space-y-2">
               {user ? (
                 <>
+                  {inCart ? (
+                    <Link to={`/s/${slug}/cart`} className={`${buttonVariants({ variant: 'primary', size: 'lg' })} w-full`}>
+                      <ShoppingCart aria-hidden className="size-4" />
+                      In cart ({cartEntry?.quantity}) — view cart
+                    </Link>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="w-full"
+                      loading={cartSetItem.isPending}
+                      disabled={cartSetItem.isPending || outOfStock}
+                      onClick={() => cartSetItem.mutate({ item, quantity: 1 })}
+                    >
+                      <ShoppingCart aria-hidden className="size-4" />
+                      {outOfStock ? 'Out of stock' : 'Add to cart'}
+                    </Button>
+                  )}
                   <Button
-                    variant={isFavorite ? 'secondary' : 'primary'}
+                    variant="secondary"
                     size="lg"
                     className="w-full"
                     loading={favoriteMutation.isPending}
@@ -340,6 +367,11 @@ export default function CardDetailsPage() {
                     {isWanted ? <ShoppingCart aria-hidden className="size-4" /> : <ListPlus aria-hidden className="size-4" />}
                     {isWanted ? 'On want list' : 'Add to want list'}
                   </Button>
+                  {cartSetItem.isError && (
+                    <p role="alert" className="text-xs font-medium text-danger-700">
+                      Could not add this card to your cart. Please try again.
+                    </p>
+                  )}
                   {favoriteMutation.isError && (
                     <p role="alert" className="text-xs font-medium text-danger-700">
                       Could not update your favorites. Please try again.

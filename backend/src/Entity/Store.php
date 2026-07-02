@@ -154,6 +154,11 @@ class Store
     #[Groups(['store:read', 'store:admin'])]
     private ?string $tagline = null;
 
+    #[ORM\Column(length: 32, options: ['default' => 'gallery'])]
+    #[Assert\Choice(choices: ['gallery', 'marketplace'])]
+    #[Groups(['store:read', 'store:admin'])]
+    private string $cardDisplayStyle = 'gallery';
+
     #[ORM\Column]
     #[Groups(['store:read', 'store:admin'])]
     private \DateTimeImmutable $createdAt;
@@ -385,6 +390,18 @@ class Store
     public function setTagline(?string $tagline): static
     {
         $this->tagline = $tagline;
+
+        return $this;
+    }
+
+    public function getCardDisplayStyle(): string
+    {
+        return $this->cardDisplayStyle;
+    }
+
+    public function setCardDisplayStyle(string $cardDisplayStyle): static
+    {
+        $this->cardDisplayStyle = $cardDisplayStyle;
 
         return $this;
     }
