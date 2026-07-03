@@ -68,14 +68,14 @@ export function cardImage(card: {
 }): string | undefined {
   const front = card.cardFaces?.[0]
   return (
-    card.imageUrl ??
     card.imageUris?.large ??
     card.imageUris?.normal ??
     card.imageUris?.small ??
-    front?.imageUrl ??
+    card.imageUrl ??
     front?.imageUris?.large ??
     front?.imageUris?.normal ??
-    front?.imageUris?.small
+    front?.imageUris?.small ??
+    front?.imageUrl
   )
 }
 

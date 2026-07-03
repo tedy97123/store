@@ -29,9 +29,9 @@ export function CardRow({ item, slug }: CardRowProps) {
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
       )}
     >
-      <div className="relative grid h-20 w-14 shrink-0 place-items-center overflow-hidden rounded-btn border border-border bg-bg">
+      <div className="relative grid h-24 w-[4.35rem] shrink-0 place-items-center overflow-hidden rounded-btn border border-border bg-black/90">
         {image ? (
-          <img src={image} alt={item.card.name} loading="lazy" className="size-full object-cover" />
+          <img src={image} alt={item.card.name} loading="lazy" decoding="async" className="size-full object-contain" />
         ) : (
           <ImageOff aria-hidden className="size-4 text-fg-muted" />
         )}

@@ -34,9 +34,9 @@ export function CardTile({ item, slug }: CardTileProps) {
     >
       {/* Card art with holographic tilt */}
       <div ref={ref} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave} className="perspective-[900px]">
-        <div className="tilt-card relative aspect-5/7 overflow-hidden bg-bg">
+        <div className="tilt-card relative aspect-5/7 overflow-hidden bg-black/90">
           {image ? (
-            <img src={image} alt={item.card.name} loading="lazy" className="size-full object-cover" />
+            <img src={image} alt={item.card.name} loading="lazy" decoding="async" className="size-full object-contain" />
           ) : (
             <div className="grid size-full place-items-center">
               <ImageOff aria-hidden className="size-7 text-fg-muted" />
