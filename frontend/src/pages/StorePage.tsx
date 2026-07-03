@@ -3,18 +3,14 @@ import { Link, useParams } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
-  GalleryHorizontalEnd,
   LayoutGrid,
   List as ListIcon,
-  Package,
   Search,
   ShoppingCart,
   SlidersHorizontal,
   Sparkles,
   Store as StoreIcon,
   UserCircle,
-  WalletCards,
   X,
 } from 'lucide-react'
 import { formatPrice, parsePriceInput, scryfallPriceCents } from '../api/client'
@@ -26,48 +22,18 @@ import { CardRow, CardTile, MarketplaceCard, SpotlightCard } from '../components
 import { StoreHero } from '../components/store/StoreHero'
 import { cx } from '../lib/cx'
 import { MANA_COLORS } from '../lib/mtg'
-
-type FinishFilter = 'all' | 'foil' | 'nonfoil'
-type SortKey = 'featured' | 'price-desc' | 'price-asc' | 'name' | 'newest'
-type ViewMode = 'grid' | 'list'
-
-const COLORS = [
-  { key: 'W', label: 'White', dark: true },
-  { key: 'U', label: 'Blue', dark: false },
-  { key: 'B', label: 'Black', dark: false },
-  { key: 'R', label: 'Red', dark: false },
-  { key: 'G', label: 'Green', dark: false },
-  { key: 'C', label: 'Colorless', dark: true },
-] as const
-
-const FINISH_OPTIONS: { key: FinishFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'nonfoil', label: 'Nonfoil' },
-  { key: 'foil', label: 'Foil' },
-]
-
-const SORTS: { value: SortKey; label: string }[] = [
-  { value: 'featured', label: 'Featured' },
-  { value: 'price-desc', label: 'Price: High to Low' },
-  { value: 'price-asc', label: 'Price: Low to High' },
-  { value: 'name', label: 'Name: A–Z' },
-  { value: 'newest', label: 'Newest' },
-]
-
-// Themed shortcut tiles shown above the spotlight. Entries with a `path` link
-// to a store-relative page; the rest are placeholders until their destinations
-// are built.
-const QUICK_ACTIONS: { label: string; icon: typeof Search; path?: string }[] = [
-  { label: 'Search Cards', icon: Search },
-  { label: 'Case cards', icon: GalleryHorizontalEnd },
-  { label: 'Mass Search', icon: ClipboardList, path: 'mass-search' },
-  { label: 'Deck Builder', icon: Package },
-  { label: 'Sell/Trade', icon: WalletCards },
-]
-
-const DEFAULT_SPOTLIGHT_MIN_PRICE_CENTS = 1000
-const SPOTLIGHT_MAX_ITEMS = 12
-const RESULTS_PAGE_SIZE = 24
+import {
+  COLORS,
+  DEFAULT_SPOTLIGHT_MIN_PRICE_CENTS,
+  FINISH_OPTIONS,
+  QUICK_ACTIONS,
+  RESULTS_PAGE_SIZE,
+  SORTS,
+  SPOTLIGHT_MAX_ITEMS,
+  type FinishFilter,
+  type SortKey,
+  type ViewMode,
+} from './utils/storePageConstants'
 
 function cardColors(item: InventoryItem): string[] {
   const identity = item.card.colorIdentity ?? item.card.colors ?? []
@@ -94,6 +60,7 @@ export default function StorePage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [page, setPage] = useState(1)
   const railRef = useRef<HTMLDivElement>(null)
+  const searchSectionRef = useRef<HTMLDivElement>(null)
 
   const { data: store } = useStore(slug)
   useStoreTheme(store)
@@ -215,6 +182,19 @@ export default function StorePage() {
   function scrollRail(direction: 1 | -1) {
     const el = railRef.current
     if (el) el.scrollBy({ left: direction * el.clientWidth * 0.85, behavior: 'smooth' })
+  }
+
+  function focusVisibleSearchInput() {
+    const inputs = ['store-search-sidebar', 'store-search-drawer']
+      .map((id) => document.getElementById(id) as HTMLInputElement | null)
+      .filter((el): el is HTMLInputElement => Boolean(el))
+    const visible = inputs.find((el) => el.offsetParent !== null)
+    visible?.focus({ preventScroll: true })
+  }
+
+  function scrollToSearchSection() {
+    searchSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    window.setTimeout(focusVisibleSearchInput, 350)
   }
 
   const advancedCount = (setFilter ? 1 : 0) + (oracleFilter.trim() ? 1 : 0) + (minPrice.trim() ? 1 : 0) + (maxPrice.trim() ? 1 : 0)
@@ -365,7 +345,7 @@ export default function StorePage() {
           Browse thousands of in-stock singles, build decks, sell or trade your collection.
         </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {QUICK_ACTIONS.map(({ label, icon: Icon, path }) => {
+          {QUICK_ACTIONS.map(({ label, icon: Icon, path, action }) => {
             const tileClass =
               'flex flex-col items-center justify-center gap-3 rounded-card border border-border bg-surface px-4 py-8 text-fg shadow-card transition-colors hover:border-brand-500 hover:bg-bg'
             const content = (
@@ -379,7 +359,12 @@ export default function StorePage() {
                 {content}
               </Link>
             ) : (
-              <button key={label} type="button" className={tileClass}>
+              <button
+                key={label}
+                type="button"
+                className={tileClass}
+                onClick={action === 'search' ? scrollToSearchSection : undefined}
+              >
                 {content}
               </button>
             )
@@ -434,7 +419,7 @@ export default function StorePage() {
         </section>
       )}
 
-      <div className="grid items-start gap-8 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <div ref={searchSectionRef} id="store-search" className="scroll-mt-24 grid items-start gap-8 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="hidden lg:block">
           <div className="sticky top-20 rounded-card border border-border bg-surface p-5 shadow-card">
             <div className="mb-5 flex items-center justify-between gap-3">
@@ -540,7 +525,7 @@ export default function StorePage() {
           ) : (
             <div className="space-y-6">
               {cardDisplayStyle === 'marketplace' ? (
-                <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {visibleResults.map((item) => (
                     <MarketplaceCard
                       key={item.id}
@@ -554,7 +539,7 @@ export default function StorePage() {
                   ))}
                 </div>
               ) : view === 'grid' ? (
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                   {visibleResults.map((item) => (
                     <CardTile key={item.id} item={item} slug={slug} />
                   ))}

@@ -6,12 +6,14 @@ use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\Link;
+use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Post;
 use App\Enum\OrderStatus;
 use App\Repository\OrderRepository;
 use App\State\StoreOrderCollectionProvider;
 use App\State\StoreOrderItemProvider;
 use App\State\StoreOrderProcessor;
+use App\State\StoreOrderStatusProcessor;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
@@ -41,6 +43,20 @@ use Symfony\Component\Validator\Constraints as Assert;
             normalizationContext: ['groups' => ['order:read']],
             security: "is_granted('STORE_MANAGE', object.getStore())",
             provider: StoreOrderItemProvider::class,
+        ),
+        new Patch(
+            uriTemplate: '/stores/{slug}/orders/{id}',
+            uriVariables: [
+                'slug' => new Link(fromProperty: 'store', fromClass: Store::class, identifiers: ['slug']),
+                'id' => new Link(fromClass: Order::class),
+            ],
+            normalizationContext: ['groups' => ['order:read']],
+            // Status only: the PATCH endpoint exists to move an order through
+            // its workflow, not to rewrite customer details on a placed order.
+            denormalizationContext: ['groups' => ['order:status']],
+            security: "is_granted('STORE_MANAGE', object.getStore())",
+            provider: StoreOrderItemProvider::class,
+            processor: StoreOrderStatusProcessor::class,
         ),
         new Post(
             uriTemplate: '/stores/{slug}/orders',
@@ -72,7 +88,7 @@ class Order
     private string $reference = '';
 
     #[ORM\Column(enumType: OrderStatus::class)]
-    #[Groups(['order:read', 'order:write'])]
+    #[Groups(['order:read', 'order:write', 'order:status'])]
     private OrderStatus $status = OrderStatus::PENDING;
 
     #[ORM\Column(length: 255, nullable: true)]
@@ -110,6 +126,12 @@ class Order
     {
         $this->createdAt = new \DateTimeImmutable();
         $this->lines = new ArrayCollection();
+    }
+
+    /** Single source of truth for the human-facing order reference format. */
+    public static function generateReference(): string
+    {
+        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
     }
 
     public function getId(): ?int

@@ -1,19 +1,23 @@
 # Customers & orders
 
-Covers per-store customer profiles, favorites, want lists (all via the `StoreCustomerController`), plus orders and sales reports (API Platform `Order` resource).
+Covers per-store customer profiles, favorites, want lists, customer carts, local test orders, owner order management, customer order history, notifications, and sales reports.
 
-A **`StoreCustomer`** links a global `User` to a specific `Store` (unique per `user_id + store_id`). Favorites and want-list entries hang off that customer row.
+A `StoreCustomer` links a global `User` to a specific `Store` with a unique `user_id + store_id` pair. Favorites and want-list entries hang off that customer row.
 
-**Create-on-write:** `GET` endpoints never create rows — they return empty if the user has no `StoreCustomer` at that store yet. The row is created lazily on the first `PUT`/`POST`/`PATCH`.
+Create-on-write: read endpoints do not create customer rows. They return an empty representation if the user has no `StoreCustomer` yet, and the row is created lazily on the first write.
 
-All customer routes are under `StoreCustomerController` at `/api/stores/{slug}/customer`, gated by `ROLE_USER`.
+Customer routes are under `StoreCustomerController` at `/api/stores/{slug}/customer`, gated by `ROLE_USER`. Owner order routes are API Platform `Order` operations under `/api/stores/{slug}/orders`, gated by `STORE_MANAGE`.
 
 | Feature | Route(s) |
 |---------|----------|
-| Profile | `GET` / `PATCH /api/stores/{slug}/customer` |
+| Profile | `GET /api/stores/{slug}/customer`, `PATCH /api/stores/{slug}/customer` |
 | Favorites | `GET /favorites`, `PUT /favorites/{itemId}`, `DELETE /favorites/{itemId}` |
 | Want list | `GET /want-list`, `POST /want-list`, `DELETE /want-list/{id}` |
-| Orders | `GET/POST /api/stores/{slug}/orders`, `GET /orders/{id}` |
+| Cart | `GET /cart`, `PUT /cart/{itemId}`, `DELETE /cart/{itemId}`, `DELETE /cart` |
+| Local test order | `POST /test-order` |
+| Customer order history | `GET /orders` |
+| Customer notifications | `GET /notifications`, `PATCH /notifications/{id}/read` |
+| Owner orders | `GET /api/stores/{slug}/orders`, `POST /api/stores/{slug}/orders`, `GET /api/stores/{slug}/orders/{id}`, `PATCH /api/stores/{slug}/orders/{id}` |
 
 ---
 
@@ -21,103 +25,199 @@ All customer routes are under `StoreCustomerController` at `/api/stores/{slug}/c
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ CustomerProfilePage.tsx"]
-        show["useCustomerProfile(slug)<br/>api.get('/stores/{slug}/customer')"]
-        save["api.patch('/stores/{slug}/customer', values)"]
+    subgraph FE["Frontend: CustomerProfilePage.tsx"]
+        show["useCustomerProfile(slug)"]
+        save["api.patch('/stores/{slug}/customer')"]
     end
-    show -->|GET| rt1["🌐 GET .../customer"]
-    save -->|PATCH| rt2["🌐 PATCH .../customer"]
-    rt1 --> sc1["🎛️ StoreCustomerController::show()"]
-    rt2 --> sc2["🎛️ StoreCustomerController::update()"]
+    show --> rt1["GET /api/stores/{slug}/customer"]
+    save --> rt2["PATCH /api/stores/{slug}/customer"]
+    rt1 --> sc1["StoreCustomerController::show()"]
+    rt2 --> sc2["StoreCustomerController::update()"]
     sc1 --> find["StoreCustomerRepository::findOneForUserAndStore()"]
-    sc2 --> getor["StoreCustomerRepository::getOrCreateForUserAndStore()<br/>(create-on-write)"]
-    find --> db[("🗄️ store_customers SELECT<br/>(empty repr if none)")]
-    getor --> dbw[("🗄️ store_customers INSERT/UPDATE<br/>phone, shipping, payment meta")]
+    sc2 --> getor["StoreCustomerRepository::getOrCreateForUserAndStore()"]
+    find --> db["store_customers SELECT"]
+    getor --> dbw["store_customers INSERT/UPDATE"]
 ```
 
-`update()` validates payment metadata (last4 = 4 digits, expiry `MM/YY`) before persisting. No card numbers stored — only brand/last4/expiry.
+`update()` validates payment metadata before persisting. No card numbers are stored; only brand, last4, and expiry metadata are accepted.
 
 ---
 
-## Favorites
+## Favorites and want list
+
+Favorites point at concrete `InventoryItem` rows, so the favorited item must belong to the requested store. Want-list entries may point at a shared catalog `Card`, but `card_id` is optional so customers can request cards that are not in the local catalog yet.
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ FavoritesPanel / CardDetailsPage"]
-        lst["useCustomerFavorites(slug)<br/>GET /customer/favorites"]
-        addf["PUT /customer/favorites/{itemId}"]
-        delf["DELETE /customer/favorites/{itemId}"]
+    subgraph FE["Frontend: CustomerProfilePage.tsx / CardDetailsPage"]
+        fav["favorites GET/PUT/DELETE"]
+        want["want-list GET/POST/DELETE"]
     end
-    lst --> cf1["🎛️ Controller::favorites()"]
-    addf --> cf2["🎛️ Controller::addFavorite()<br/>(create customer if needed)"]
-    delf --> cf3["🎛️ Controller::removeFavorite()"]
-    cf1 --> q1["CustomerFavoriteRepository::findForCustomer()<br/>JOIN inventoryItem ⋈ card"]
-    cf2 --> resolve["InventoryItemRepository::findOneByStoreAndId()<br/>(item must belong to this store)"]
-    q1 --> db[("🗄️ customer_favorites SELECT<br/>ORDER BY createdAt DESC")]
-    cf2 --> dbw[("🗄️ customer_favorites INSERT<br/>(unique customer+item)")]
-    cf3 --> dbd[("🗄️ customer_favorites DELETE")]
+    fav --> ctl["StoreCustomerController"]
+    want --> ctl
+    ctl --> customer["StoreCustomerRepository"]
+    ctl --> inv["InventoryItemRepository"]
+    ctl --> card["CardRepository"]
+    ctl --> db["store_customers, customer_favorites, customer_want_list_entries"]
 ```
-
-The favorited item must belong to the customer's store (validated via `findOneByStoreAndId`). Unique `(customer, inventory_item)` prevents duplicates; `PUT` is idempotent.
-
----
-
-## Want list
-
-```mermaid
-flowchart LR
-    subgraph FE["🖥️ WantListPanel / WantListAddForm"]
-        lst["useCustomerWantList(slug)<br/>GET /customer/want-list"]
-        search["catalog search (see catalog doc)"]
-        add["POST /customer/want-list<br/>{cardId?, cardName, setCode, isFoil, quantity, notes}"]
-        del["DELETE /customer/want-list/{id}"]
-    end
-    lst --> w1["🎛️ Controller::wantList()"]
-    add --> w2["🎛️ Controller::addWantListEntry()<br/>(create customer if needed)"]
-    del --> w3["🎛️ Controller::removeWantListEntry()"]
-    w1 --> q["CustomerWantListEntryRepository::findForCustomer()<br/>LEFT JOIN card"]
-    w2 --> card["CardRepository::find(cardId) (optional)"]
-    q --> db[("🗄️ customer_want_list_entries SELECT")]
-    w2 --> dbw[("🗄️ ..._entries INSERT<br/>card_id nullable")]
-    w3 --> dbd[("🗄️ ..._entries DELETE (owned by customer)")]
-```
-
-`card_id` is optional — you can want a card that isn't in the local catalog (stored by name/set). No unique constraint, so duplicates with different specs are allowed.
 
 | Layer | Where |
 |-------|-------|
-| Frontend | `pages/CustomerProfilePage.tsx`, `hooks/useCustomer.ts` |
+| Frontend | `pages/CustomerProfilePage.tsx`, `hooks/useCustomer.ts`, `components/cards/*` |
 | Controller | `Controller/StoreCustomerController.php` |
 | Repos | `StoreCustomerRepository`, `CustomerFavoriteRepository`, `CustomerWantListEntryRepository`, `InventoryItemRepository`, `CardRepository` |
 | DB | `store_customers`, `customer_favorites`, `customer_want_list_entries` |
 
 ---
 
-## Orders & sales reports
+## Cart and local test checkout
 
-Orders are an **API Platform resource** (`Order`), store-scoped via the tenant filter and gated by `STORE_MANAGE`.
+The cart is customer-scoped and store-scoped. In local development, the cart can be converted into an unpaid `pending` order without Square.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant FE as CartPage.tsx
+    participant Ctl as StoreCustomerController
+    participant DB as PostgreSQL
+    participant Admin as OrdersTab.tsx
+
+    Customer->>FE: Add inventory items to cart
+    FE->>Ctl: PUT /customer/cart/{itemId}
+    Ctl->>DB: upsert cart item for StoreCustomer
+    Customer->>FE: Create test order
+    FE->>Ctl: POST /customer/test-order
+    Ctl->>DB: create orders + order_lines
+    Ctl->>DB: clear customer cart
+    Ctl-->>FE: Order(status=pending)
+    Admin->>Ctl: GET /api/stores/{slug}/orders
+```
+
+- `POST /customer/test-order` is available only in `dev` and `test`. In other environments the controller returns `404`.
+- The test order path does not charge Square or PayPal. It exists so order history, owner fulfillment, print sheets, notifications, and Mailpit email can be tested locally.
+- The frontend exposes the action when `import.meta.env.DEV` or `VITE_ENABLE_TEST_CHECKOUT=true`.
+
+---
+
+## Owner order management
+
+Orders are API Platform resources. Store owners read orders through `StoreOrderCollectionProvider`, can create manual orders through `StoreOrderProcessor`, and update status through `StoreOrderStatusProcessor`.
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ store-admin"]
-        ot["OrdersTab.tsx<br/>GET /stores/{slug}/orders"]
-        rt2["ReportsTab.tsx<br/>(same fetch, aggregates client-side)"]
+    subgraph FE["Frontend: store admin"]
+        ot["OrdersTab.tsx"]
+        badge["AdminLayout active-order badge"]
+        reports["ReportsTab.tsx"]
     end
-    ot & rt2 -->|GET| route["🌐 GET /api/stores/{slug}/orders"]
-    route --> prov["🎛️ StoreOrderCollectionProvider::provide()"]
-    prov --> repo["🗄️ OrderRepository::findByStore()<br/>WHERE store_id ORDER BY createdAt DESC"]
-    repo --> db[("orders ⋈ order_lines SELECT")]
-    create["POST /stores/{slug}/orders"] --> op["🎛️ StoreOrderProcessor::process()<br/>generate ref, build OrderLines, validate"]
-    op --> dbw[("🗄️ orders INSERT + order_lines INSERT")]
+    ot --> route["GET/PATCH /api/stores/{slug}/orders"]
+    badge --> route
+    reports --> route
+    route --> read["StoreOrderCollectionProvider / StoreOrderItemProvider"]
+    route --> create["StoreOrderProcessor"]
+    route --> write["StoreOrderStatusProcessor"]
+    read --> repo["OrderRepository::findByStore()"]
+    create --> db
+    write --> db["orders UPDATE"]
+    repo --> db2["orders JOIN order_lines"]
 ```
 
-- **Reports** reuse the orders list — revenue, pending, refunded totals, average order value, and per-status breakdown are all computed **client-side** in `ReportsTab.tsx`. There's no backend aggregation endpoint.
-- **`StoreOrderProcessor`** generates the unique `ORD-xxxxxxxx` reference, resolves optional card references, and builds `OrderLine` rows (validating quantity ≥ 1, price ≥ 0).
-- Order status transitions follow the `OrderStatus` enum (`pending → paid → shipped → completed`, or `cancelled`/`refunded`).
+Current primary workflow:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> received
+    received --> fulfilled
+    pending --> cancelled
+    received --> refunded
+    fulfilled --> [*]
+    cancelled --> [*]
+    refunded --> [*]
+```
+
+Legacy statuses are still accepted for existing data and reports: `paid`, `shipped`, and `completed`. The frontend normalizes `paid` and `shipped` into the active received step and treats `completed` as fulfilled.
+
+The order detail panel includes a print sheet action. The print sheet renders order reference, date, customer, card name, set, collector number, quantity, unit price, line total, pre-tax total, tax, and post-tax total. Tax is currently displayed as `$0.00` because tax calculation is not persisted yet.
+
+---
+
+## Customer order history
+
+Customers see their own store-specific order history from the profile page.
+
+```mermaid
+flowchart LR
+    profile["CustomerProfilePage orders tab"] --> hook["useCustomerOrders(slug)"]
+    hook --> route["GET /api/stores/{slug}/customer/orders"]
+    route --> ctl["StoreCustomerController::orders()"]
+    ctl --> repo["OrderRepository::findByStoreAndCustomerEmail()"]
+    repo --> db["orders JOIN order_lines JOIN cards"]
+```
+
+Orders are matched by the authenticated user's email and the current store. Serialized lines include card images, set code, and collector number so the profile page can show the ordered card image and printing details.
+
+---
+
+## Notifications and email
+
+In-app notifications are persisted in `customer_notifications`; email is a delivery side effect. The database notification is the source of truth for the bell, unread count, and profile notification list.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Owner
+    participant FE as OrdersTab.tsx
+    participant API as PATCH /orders/{id}
+    participant P as StoreOrderStatusProcessor
+    participant DB as PostgreSQL
+    participant Mail as Symfony Mailer / Mailpit
+    participant Bell as NotificationBell
+
+    Owner->>FE: Mark order fulfilled
+    FE->>API: PATCH status=fulfilled
+    API->>P: process(order)
+    P->>DB: update order status
+    P->>DB: insert customer_notifications row
+    P->>Mail: send fulfilled email
+    Bell->>DB: poll GET /customer/notifications
+```
+
+- A notification is created when an order first transitions to `fulfilled` or legacy `completed`.
+- The processor looks up the `User` by `orders.customer_email`. If no matching user exists, no customer notification is created.
+- Duplicate fulfilled notifications are prevented by checking `(user, order, type)`.
+- Mail delivery uses Symfony Mailer. Local development sends to Mailpit via `MAILER_DSN=smtp://127.0.0.1:1025`; the UI is at `http://localhost:8025`.
+- If Mailpit is not running, the processor catches transport errors so the in-app notification is still saved.
+- The frontend polls notifications every 15 seconds and refetches on mount, reconnect, and window focus. Realtime SSE/WebSocket delivery is a future upgrade.
 
 | Layer | Where |
 |-------|-------|
-| Frontend | `pages/store-admin/OrdersTab.tsx`, `ReportsTab.tsx` |
-| Routes | `GET/POST /api/stores/{slug}/orders`, `GET /orders/{id}` |
-| Entry | `State/StoreOrderCollectionProvider.php`, `StoreOrderItemProvider.php`, `StoreOrderProcessor.php` |
-| Repo/DB | `OrderRepository`, `OrderLineRepository`, `CardRepository` → `orders`, `order_lines` |
+| Backend entity | `Entity/CustomerNotification.php` |
+| Backend repo | `Repository/CustomerNotificationRepository.php` |
+| Fulfillment side effects | `State/StoreOrderStatusProcessor.php` |
+| Customer routes | `Controller/StoreCustomerController.php` |
+| Frontend hooks | `hooks/useCustomer.ts` |
+| Frontend UI | `components/notifications/NotificationBell.tsx`, `NotificationList.tsx`, `pages/CustomerProfilePage.tsx` |
+| DB | `customer_notifications` |
+
+---
+
+## Reports
+
+Reports reuse the owner orders list. Revenue totals, pending/refunded totals, average order value, and per-status breakdown are computed client-side in `ReportsTab.tsx`. There is no backend aggregation endpoint yet.
+
+| Layer | Where |
+|-------|-------|
+| Frontend | `pages/store-admin/OrdersTab.tsx`, `ReportsTab.tsx`, `components/orders/*`, `lib/orders.ts` |
+| Routes | `GET /api/stores/{slug}/orders`, `POST /api/stores/{slug}/orders`, `GET /api/stores/{slug}/orders/{id}`, `PATCH /api/stores/{slug}/orders/{id}`, `POST /api/stores/{slug}/customer/test-order` |
+| API Platform entry | `State/StoreOrderCollectionProvider.php`, `StoreOrderItemProvider.php`, `StoreOrderProcessor.php`, `StoreOrderStatusProcessor.php` |
+| Customer controller | `Controller/StoreCustomerController.php` |
+| Repo/DB | `OrderRepository`, `OrderLineRepository`, `CustomerNotificationRepository`, `CardRepository` -> `orders`, `order_lines`, `customer_notifications`, `cards` |
+
+## Known gaps
+
+- Real payment capture is not wired into checkout yet. Square OAuth account linking exists, but test orders bypass payment providers.
+- Tax and shipping are not calculated or stored on orders yet.
+- Notifications are polling-based, not pushed in realtime.
+- Fulfillment email is plain text and does not use templates or per-user notification preferences yet.

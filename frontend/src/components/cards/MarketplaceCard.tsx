@@ -30,7 +30,7 @@ export function MarketplaceCard({
   const outOfStock = item.quantity < 1
 
   return (
-    <article className="group flex min-h-[13rem] gap-4 rounded-card border border-border bg-surface p-3 shadow-card transition-[border-color,box-shadow] hover:border-brand-300 hover:shadow-[0_12px_28px_-18px_rgb(16_24_40/0.28)]">
+    <article className="group flex min-h-52 gap-4 rounded-card border border-border bg-surface p-3 shadow-card transition-[border-color,box-shadow] hover:border-brand-300 hover:shadow-[0_12px_28px_-18px_rgb(16_24_40/0.28)]">
       <Link
         to={`/s/${slug}/cards/${item.id}`}
         className="w-24 shrink-0 self-center sm:w-28"

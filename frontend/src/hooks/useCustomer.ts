@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../api/client'
-import type { CartItem, CustomerFavorite, CustomerWantListEntry, StoreCustomer } from '../api/types'
+import type { CartItem, CustomerFavorite, CustomerNotification, CustomerWantListEntry, Order, StoreCustomer } from '../api/types'
 
 /**
  * Centralized React Query keys + fetchers for a customer's per-store data.
@@ -12,6 +12,8 @@ export const customerKeys = {
   favorites: (slug: string) => ['customer-favorites', slug] as const,
   wantList: (slug: string) => ['customer-want-list', slug] as const,
   cart: (slug: string) => ['customer-cart', slug] as const,
+  orders: (slug: string) => ['customer-orders', slug] as const,
+  notifications: (slug: string) => ['customer-notifications', slug] as const,
 }
 
 export function useCustomerProfile(slug: string, enabled = true) {
@@ -55,5 +57,47 @@ export function useCustomerCart(slug: string, enabled = true) {
       return data
     },
     enabled: Boolean(slug) && enabled,
+  })
+}
+
+export function useCustomerOrders(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: customerKeys.orders(slug),
+    queryFn: async () => {
+      const { data } = await api.get<Order[]>(`/stores/${slug}/customer/orders`)
+      return data
+    },
+    enabled: Boolean(slug) && enabled,
+  })
+}
+
+export function useCustomerNotifications(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: customerKeys.notifications(slug),
+    queryFn: async () => {
+      const { data } = await api.get<CustomerNotification[]>(`/stores/${slug}/customer/notifications`)
+      return data
+    },
+    enabled: Boolean(slug) && enabled,
+    // Poll while the tab is visible; the default refetch-on-focus covers the
+    // return from a hidden tab, so no background polling is needed.
+    refetchInterval: 15_000,
+  })
+}
+
+/**
+ * Mark a notification read. Shared by the navbar bell and the account page so
+ * both surfaces invalidate the same cache. Gate spinners on
+ * `isPending && variables === id` — `variables` persists after the mutation
+ * settles.
+ */
+export function useMarkNotificationRead(slug: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await api.patch(`/stores/${slug}/customer/notifications/${id}/read`)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.notifications(slug) }),
   })
 }

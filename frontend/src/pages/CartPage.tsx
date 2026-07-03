@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -16,14 +17,17 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react'
-import { cardImage, formatPrice, scryfallPriceCents } from '../api/client'
-import type { CartItem, InventoryItem } from '../api/types'
+import api, { cardImage, extractErrorMessage, formatPrice, scryfallPriceCents } from '../api/client'
+import type { CartItem, InventoryItem, Order } from '../api/types'
 import { useAuth } from '../context/AuthContext'
-import { useCart, useDebouncedValue, useInventory, useStore, useStoreTheme } from '../hooks'
+import { ordersKey, useCart, useDebouncedValue, useInventory, useStore, useStoreTheme } from '../hooks'
+import { customerKeys } from '../hooks/useCustomer'
 import { Badge, Button, buttonVariants, EmptyState, LoadingPanel } from '../components/ui'
 import { SpotlightCard } from '../components/cards'
 import { cx } from '../lib/cx'
 import { FOIL_GRADIENT, rarityAccent } from '../lib/mtg'
+
+const TEST_CHECKOUT_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_TEST_CHECKOUT === 'true'
 
 function lineUnitCents(entry: CartItem): number {
   return entry.inventoryItem.priceCents
@@ -37,12 +41,28 @@ interface RemovedLine {
 export default function CartPage() {
   const { slug = '' } = useParams()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
   const { data: store } = useStore(slug)
   useStoreTheme(store)
 
   const { query, setItem, removeItem, clear } = useCart(slug, Boolean(user))
   const { data: cart = [], isLoading } = query
   const [removed, setRemoved] = useState<RemovedLine | null>(null)
+
+  const testOrder = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<Order>(`/stores/${slug}/customer/test-order`)
+      return data
+    },
+    onSuccess: async () => {
+      queryClient.setQueryData(customerKeys.cart(slug), [])
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: customerKeys.cart(slug) }),
+        queryClient.invalidateQueries({ queryKey: customerKeys.orders(slug) }),
+        queryClient.invalidateQueries({ queryKey: ordersKey(slug) }),
+      ])
+    },
+  })
 
   useEffect(() => {
     if (!removed) return
@@ -151,6 +171,11 @@ export default function CartPage() {
             storeName={store?.name ?? 'the store'}
             itemCount={itemCount}
             subtotalLabel={subtotalLabel}
+            testCheckoutEnabled={TEST_CHECKOUT_ENABLED}
+            testOrderPending={testOrder.isPending}
+            testOrderError={testOrder.error}
+            createdOrder={testOrder.data ?? null}
+            onCreateTestOrder={() => testOrder.mutate()}
           />
         </div>
       )}
@@ -182,10 +207,17 @@ export default function CartPage() {
               <p className="text-xs font-bold uppercase tracking-wide text-fg-muted">Estimated total</p>
               <p className="font-display text-xl font-bold text-fg">{subtotalLabel}</p>
             </div>
-            <Button size="lg" disabled title="Checkout coming soon">
-              <Lock aria-hidden className="size-4" />
-              Checkout
-            </Button>
+            {TEST_CHECKOUT_ENABLED ? (
+              <Button size="lg" loading={testOrder.isPending} onClick={() => testOrder.mutate()}>
+                <PackageCheck aria-hidden className="size-4" />
+                Test order
+              </Button>
+            ) : (
+              <Button size="lg" disabled title="Checkout coming soon">
+                <Lock aria-hidden className="size-4" />
+                Checkout
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -314,11 +346,21 @@ function OrderSummary({
   storeName,
   itemCount,
   subtotalLabel,
+  testCheckoutEnabled,
+  testOrderPending,
+  testOrderError,
+  createdOrder,
+  onCreateTestOrder,
 }: {
   slug: string
   storeName: string
   itemCount: number
   subtotalLabel: string
+  testCheckoutEnabled: boolean
+  testOrderPending: boolean
+  testOrderError: unknown
+  createdOrder: Order | null
+  onCreateTestOrder: () => void
 }) {
   return (
     <aside className="rounded-card border border-border bg-surface p-5 shadow-card lg:sticky lg:top-20">
@@ -342,10 +384,35 @@ function OrderSummary({
         </div>
       </dl>
 
-      <Button className="mt-5 w-full" size="lg" disabled title="Checkout coming soon">
-        <Lock aria-hidden className="size-4" />
-        Checkout
-      </Button>
+      {testCheckoutEnabled ? (
+        <div className="mt-5 space-y-3">
+          <Button className="w-full" size="lg" loading={testOrderPending} onClick={onCreateTestOrder}>
+            <PackageCheck aria-hidden className="size-4" />
+            Create test order
+          </Button>
+          <p className="rounded-btn border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs leading-5 text-warning-700">
+            Local testing only. This creates a pending order from the cart without charging Square.
+          </p>
+          {Boolean(testOrderError) && (
+            <p className="rounded-btn border border-danger-500/30 bg-danger-50 px-3 py-2 text-xs leading-5 text-danger-700">
+              {extractErrorMessage(testOrderError, 'Could not create test order.')}
+            </p>
+          )}
+          {createdOrder && (
+            <Link
+              to={`/s/${slug}/account?tab=orders`}
+              className={`${buttonVariants({ variant: 'secondary', size: 'md' })} w-full`}
+            >
+              View {createdOrder.reference}
+            </Link>
+          )}
+        </div>
+      ) : (
+        <Button className="mt-5 w-full" size="lg" disabled title="Checkout coming soon">
+          <Lock aria-hidden className="size-4" />
+          Checkout
+        </Button>
+      )}
       <Link to={`/s/${slug}`} className={`${buttonVariants({ variant: 'secondary', size: 'md' })} mt-2 w-full`}>
         Continue shopping
       </Link>
@@ -424,7 +491,7 @@ function CartLine({
     <li className="grid gap-4 rounded-card border border-border bg-surface p-4 shadow-card transition-shadow hover:shadow-[0_16px_40px_-18px_rgb(16_24_40/0.28)] sm:grid-cols-[6.75rem_minmax(0,1fr)] sm:p-5">
       <Link
         to={`/s/${slug}/cards/${item.id}`}
-        className="relative h-40 w-28 overflow-hidden rounded-btn border-2 bg-bg sm:h-36 sm:w-full"
+        className={cx('relative h-40 w-28 overflow-hidden rounded-btn border-2 bg-bg sm:h-36 sm:w-full', item.isFoil && 'foil-card')}
         style={{ borderColor: accent }}
       >
         {image ? (
@@ -437,8 +504,7 @@ function CartLine({
         {item.isFoil && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-50 mix-blend-color-dodge"
-            style={{ backgroundImage: FOIL_GRADIENT, backgroundSize: '200% 200%' }}
+            className="foil-shimmer pointer-events-none absolute inset-0"
           />
         )}
       </Link>

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { useStore, useStoreTheme } from '../../hooks'
+import { useOrders, useStore, useStoreTheme } from '../../hooks'
+import { isOpenOrder } from '../../lib/orders'
 import { Avatar, Button, buttonVariants } from '../ui'
 import {
   Boxes,
@@ -64,6 +65,8 @@ export default function AdminLayout() {
   // Theme the owner admin portal with the store's branding (no-op for platform admin).
   const { data: store } = useStore(params.slug)
   useStoreTheme(store)
+  const { data: orders = [] } = useOrders(params.slug ?? '')
+  const activeOrderCount = orders.filter(isOpenOrder).length
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -126,7 +129,12 @@ export default function AdminLayout() {
                 className={navLinkClass}
               >
                 <Icon aria-hidden className="size-4" />
-                {item.label}
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                {item.label === 'Orders' && activeOrderCount > 0 && (
+                  <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-danger-600 px-1.5 text-[0.68rem] font-black leading-none text-white ring-2 ring-surface">
+                    {activeOrderCount > 99 ? '99+' : activeOrderCount}
+                  </span>
+                )}
               </NavLink>
             )
           })}

@@ -136,11 +136,23 @@ body {
 }
 
 @layer components {
+  /*
+   * Foil intensity knobs:
+   * - Increase --foil-shimmer-opacity-max for a brighter flash.
+   * - Decrease --foil-shimmer-duration for a faster shimmer.
+   */
+  .foil-card {
+    --foil-holo-opacity: 0.30;
+    --foil-shimmer-opacity-min: 0.24;
+    --foil-shimmer-opacity-mid: 0.38;
+    --foil-shimmer-opacity-max: 0.66;
+    --foil-shimmer-duration: 3s;
+  }
   .tilt-card {
     transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
     transform-style: preserve-3d;
     /* Smooth, springy glide toward the pointer and back to rest. */
-    transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition: transform 0.45s cubic-bezier(0.32, 0.61, 0.36, 1);
     will-change: transform;
   }
   .tilt-glare {
@@ -168,9 +180,72 @@ body {
     background-position: var(--mx, 50%) var(--my, 50%);
     mix-blend-mode: color-dodge;
     filter: saturate(1.4) contrast(1.1);
-    opacity: calc(var(--op, 0) * 0.65);
+    opacity: max(var(--foil-holo-opacity, 0.26), calc(var(--op, 0) * 0.72));
     /* Ease both the fade and the sheen sweep so foil shimmers instead of jumping. */
-    transition: opacity 0.5s ease, background-position 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition: opacity 0.5s ease;
+    animation: foil-sweep 4.8s linear infinite;
+  }
+  .foil-shimmer {
+    background-image:
+      linear-gradient(
+        115deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0) 34%,
+        rgba(255, 255, 255, 0.55) 47%,
+        rgba(255, 255, 255, 0.08) 56%,
+        transparent 72%
+      ),
+      repeating-linear-gradient(
+        110deg,
+        rgba(255, 0, 132, 0.35) 0%,
+        rgba(0, 153, 255, 0.35) 12%,
+        rgba(0, 255, 170, 0.35) 24%,
+        rgba(255, 215, 0, 0.35) 36%,
+        rgba(170, 0, 255, 0.35) 48%,
+        rgba(255, 0, 132, 0.35) 60%
+      );
+    background-size: 220% 220%, 280% 280%;
+    background-position: -140% 50%, 0% 50%;
+    mix-blend-mode: color-dodge;
+    filter: saturate(1.65) contrast(1.16) brightness(1.08);
+    animation: foil-flash var(--foil-shimmer-duration, 3.6s) ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tilt-holo,
+    .foil-shimmer {
+      animation: none;
+    }
+  }
+}
+
+@keyframes foil-sweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes foil-flash {
+  0% {
+    background-position: -140% 50%, 0% 50%;
+    opacity: var(--foil-shimmer-opacity-min, 0.36);
+  }
+  48% {
+    opacity: var(--foil-shimmer-opacity-mid, 0.5);
+  }
+  68% {
+    background-position: 160% 50%, 100% 50%;
+    opacity: var(--foil-shimmer-opacity-max, 0.78);
+  }
+  100% {
+    background-position: 160% 50%, 0% 50%;
+    opacity: var(--foil-shimmer-opacity-min, 0.36);
   }
 }
 
