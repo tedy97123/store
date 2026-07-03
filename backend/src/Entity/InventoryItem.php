@@ -32,7 +32,7 @@ use Symfony\Component\Validator\Constraints as Assert;
             // serves them in full for the card details page.
             normalizationContext: [
                 'groups' => ['inventory:read'],
-                'ignored_attributes' => ['legalities', 'flavorText', 'cardFaces', 'scryfallUri'],
+                'ignored_attributes' => ['imageUris', 'legalities', 'flavorText', 'cardFaces', 'scryfallUri'],
             ],
             provider: \App\State\StoreInventoryCollectionProvider::class,
         ),

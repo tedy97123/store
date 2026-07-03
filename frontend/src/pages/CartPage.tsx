@@ -48,15 +48,13 @@ export default function CartPage() {
   const { query, setItem, removeItem, clear } = useCart(slug, Boolean(user))
   const { data: cart = [], isLoading } = query
   const [removed, setRemoved] = useState<RemovedLine | null>(null)
-  const [createdOrder, setCreatedOrder] = useState<Order | null>(null)
 
   const testOrder = useMutation({
     mutationFn: async () => {
       const { data } = await api.post<Order>(`/stores/${slug}/customer/test-order`)
       return data
     },
-    onSuccess: async (order) => {
-      setCreatedOrder(order)
+    onSuccess: async () => {
       queryClient.setQueryData(customerKeys.cart(slug), [])
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: customerKeys.cart(slug) }),
@@ -176,7 +174,7 @@ export default function CartPage() {
             testCheckoutEnabled={TEST_CHECKOUT_ENABLED}
             testOrderPending={testOrder.isPending}
             testOrderError={testOrder.error}
-            createdOrder={createdOrder}
+            createdOrder={testOrder.data ?? null}
             onCreateTestOrder={() => testOrder.mutate()}
           />
         </div>
@@ -401,7 +399,10 @@ function OrderSummary({
             </p>
           )}
           {createdOrder && (
-            <Link to={`/s/${slug}/admin/orders`} className={`${buttonVariants({ variant: 'secondary', size: 'md' })} w-full`}>
+            <Link
+              to={`/s/${slug}/account?tab=orders`}
+              className={`${buttonVariants({ variant: 'secondary', size: 'md' })} w-full`}
+            >
               View {createdOrder.reference}
             </Link>
           )}

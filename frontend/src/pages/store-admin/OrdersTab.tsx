@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Clock3, PackageCheck, Printer, ReceiptText, RotateCcw, XCircle, type LucideIcon } from 'lucide-react'
-import api, { formatPrice, httpStatus } from '../../api/client'
+import api, { extractErrorMessage, formatPrice, httpStatus } from '../../api/client'
 import type { Order, OrderStatus } from '../../api/types'
 import { ordersKey, useOrders } from '../../hooks'
 import {
@@ -20,12 +20,25 @@ import {
   TR,
 } from '../../components/ui'
 import { cx } from '../../lib/cx'
+import { formatDateTime } from '../../lib/format'
+import { printOrderSheet } from '../../lib/printOrderSheet'
 import { OrderLineList } from '../../components/orders/OrderLineList'
 import { OrderStatusBadge } from '../../components/orders/OrderStatusBadge'
 import { OrderWorkflow } from '../../components/orders/OrderWorkflow'
-import { ACTIVE_ORDER_STATUSES, ORDER_STATUS_LABELS, formatOrderDate, orderItemCount } from '../../lib/orders'
+import {
+  ORDER_STATUSES,
+  isFulfilledStatus,
+  isOpenOrder,
+  orderItemCount,
+  orderStatusLabel,
+} from '../../lib/orders'
 
-function statusActions(status: OrderStatus): { status: OrderStatus; label: string; icon: typeof CheckCircle2 }[] {
+/**
+ * Actions the admin UI offers per status. The backend enforces the full
+ * transition map (OrderStatus::allowedTransitions); this is just the curated
+ * subset surfaced as buttons.
+ */
+function statusActions(status: OrderStatus): { status: OrderStatus; label: string; icon: LucideIcon }[] {
   if (status === 'pending') {
     return [
       { status: 'received', label: 'Mark received', icon: CheckCircle2 },
@@ -38,6 +51,9 @@ function statusActions(status: OrderStatus): { status: OrderStatus; label: strin
       { status: 'refunded', label: 'Refund', icon: RotateCcw },
     ]
   }
+  if (isFulfilledStatus(status)) {
+    return [{ status: 'refunded', label: 'Refund', icon: RotateCcw }]
+  }
   return []
 }
 
@@ -47,27 +63,23 @@ export default function OrdersTab({ slug }: { slug: string }) {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all')
 
-  const selected = data.find((order) => order.id === selectedId) ?? data[0] ?? null
   const filtered = useMemo(
     () => (statusFilter === 'all' ? data : data.filter((order) => order.status === statusFilter)),
     [data, statusFilter],
   )
-  const metrics = useMemo(() => {
-    const open = data.filter((order) => order.status === 'pending' || order.status === 'received' || order.status === 'paid' || order.status === 'shipped')
-    const fulfilled = data.filter((order) => order.status === 'fulfilled' || order.status === 'completed')
-    const totalCents = data.reduce((sum, order) => sum + order.totalCents, 0)
+  // Derived, not synced state: the details pane always shows an order from
+  // the visible (filtered) list, defaulting to its first row.
+  const selected = filtered.find((order) => order.id === selectedId) ?? filtered[0] ?? null
 
-    return {
-      open: open.length,
+  const metrics = useMemo(
+    () => ({
+      open: data.filter(isOpenOrder).length,
       pending: data.filter((order) => order.status === 'pending').length,
-      fulfilled: fulfilled.length,
-      totalCents,
-    }
-  }, [data])
-
-  useEffect(() => {
-    if (selectedId === null && data.length > 0) setSelectedId(data[0].id)
-  }, [data, selectedId])
+      fulfilled: data.filter((order) => isFulfilledStatus(order.status)).length,
+      totalCents: data.reduce((sum, order) => sum + order.totalCents, 0),
+    }),
+    [data],
+  )
 
   const updateStatus = useMutation({
     mutationFn: async ({ order, status }: { order: Order; status: OrderStatus }) => {
@@ -128,70 +140,74 @@ export default function OrdersTab({ slug }: { slug: string }) {
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_25rem]">
         <Card>
-        <CardHeader
-          title="Past orders"
-          subtitle={`${data.length} ${data.length === 1 ? 'order' : 'orders'} for this store.`}
-          actions={
-            <select
-              aria-label="Filter orders by status"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as OrderStatus | 'all')}
-              className="h-9 rounded-btn border border-border bg-surface px-3 text-sm font-medium text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-            >
-              <option value="all">All statuses</option>
-              {ACTIVE_ORDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {ORDER_STATUS_LABELS[status]}
-                </option>
-              ))}
-            </select>
-          }
-        />
-        <CardBody className="p-0">
-          <Table>
-            <THead>
-              <TR className="hover:bg-transparent">
-                <TH>Reference</TH>
-                <TH>Customer</TH>
-                <TH>Status</TH>
-                <TH>Total</TH>
-                <TH>Placed</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {filtered.map((order) => (
-                <TR
-                  key={order.id}
-                  onClick={() => setSelectedId(order.id)}
-                  className={cx('cursor-pointer', selected?.id === order.id && 'bg-brand-50/70 hover:bg-brand-50')}
-                >
-                  <TD className="font-mono text-xs font-bold">{order.reference}</TD>
-                  <TD>
-                    <div className="max-w-48">
-                      <p className="truncate font-medium">{order.customerName ?? '-'}</p>
-                      {order.customerEmail && <p className="truncate text-xs text-fg-muted">{order.customerEmail}</p>}
-                    </div>
-                  </TD>
-                  <TD>
-                    <OrderStatusBadge status={order.status} />
-                  </TD>
-                  <TD className="font-bold">{formatPrice(order.totalCents)}</TD>
-                  <TD className="text-fg-muted">{formatOrderDate(order.createdAt)}</TD>
+          <CardHeader
+            title="Past orders"
+            subtitle={`${data.length} ${data.length === 1 ? 'order' : 'orders'} for this store.`}
+            actions={
+              <select
+                aria-label="Filter orders by status"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as OrderStatus | 'all')}
+                className="h-9 rounded-btn border border-border bg-surface px-3 text-sm font-medium text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              >
+                <option value="all">All statuses</option>
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {orderStatusLabel(status)}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+          <CardBody className="p-0">
+            <Table>
+              <THead>
+                <TR className="hover:bg-transparent">
+                  <TH>Reference</TH>
+                  <TH>Customer</TH>
+                  <TH>Status</TH>
+                  <TH>Total</TH>
+                  <TH>Placed</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
-          {filtered.length === 0 && (
-            <p className="border-t border-border px-4 py-8 text-center text-sm text-fg-muted">
-              No orders match this status.
-            </p>
-          )}
-        </CardBody>
+              </THead>
+              <TBody>
+                {filtered.map((order) => (
+                  <TR
+                    key={order.id}
+                    onClick={() => setSelectedId(order.id)}
+                    className={cx('cursor-pointer', selected?.id === order.id && 'bg-brand-50/70 hover:bg-brand-50')}
+                  >
+                    <TD className="font-mono text-xs font-bold">{order.reference}</TD>
+                    <TD>
+                      <div className="max-w-48">
+                        <p className="truncate font-medium">{order.customerName ?? '-'}</p>
+                        {order.customerEmail && <p className="truncate text-xs text-fg-muted">{order.customerEmail}</p>}
+                      </div>
+                    </TD>
+                    <TD>
+                      <OrderStatusBadge status={order.status} />
+                    </TD>
+                    <TD className="font-bold">{formatPrice(order.totalCents)}</TD>
+                    <TD className="text-fg-muted">{formatDateTime(order.createdAt)}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+            {filtered.length === 0 && (
+              <p className="border-t border-border px-4 py-8 text-center text-sm text-fg-muted">
+                No orders match this status.
+              </p>
+            )}
+          </CardBody>
         </Card>
 
         <OrderDetails
           order={selected}
-          pendingStatus={updateStatus.variables?.order.id === selected?.id ? updateStatus.variables.status : null}
+          pendingStatus={
+            updateStatus.isPending && updateStatus.variables?.order.id === selected?.id
+              ? updateStatus.variables.status
+              : null
+          }
           error={updateStatus.error}
           onUpdateStatus={(status) => selected && updateStatus.mutate({ order: selected, status })}
         />
@@ -214,12 +230,13 @@ function OrderDetails({
   if (!order) return null
 
   const actions = statusActions(order.status)
+  const itemCount = orderItemCount(order)
 
   return (
     <Card className="xl:sticky xl:top-20">
       <CardHeader
         title={order.reference}
-        subtitle={`${orderItemCount(order)} ${orderItemCount(order) === 1 ? 'item' : 'items'} · ${formatOrderDate(order.createdAt)}`}
+        subtitle={`${itemCount} ${itemCount === 1 ? 'item' : 'items'} · ${formatDateTime(order.createdAt)}`}
         actions={<OrderStatusBadge status={order.status} />}
       />
       <CardBody className="space-y-5">
@@ -274,145 +291,12 @@ function OrderDetails({
 
         {Boolean(error) && (
           <p role="alert" className="rounded-btn border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-700">
-            Could not update this order. Please try again.
+            {extractErrorMessage(error, 'Could not update this order. Please try again.')}
           </p>
         )}
       </CardBody>
     </Card>
   )
-}
-
-function printOrderSheet(order: Order) {
-  const preTaxTotalCents = order.totalCents
-  const taxCents = 0
-  const postTaxTotalCents = preTaxTotalCents + taxCents
-  const iframe = document.createElement('iframe')
-  iframe.setAttribute('title', `Print ${order.reference}`)
-  iframe.style.position = 'fixed'
-  iframe.style.right = '0'
-  iframe.style.bottom = '0'
-  iframe.style.width = '0'
-  iframe.style.height = '0'
-  iframe.style.border = '0'
-
-  document.body.appendChild(iframe)
-
-  const frameWindow = iframe.contentWindow
-  const frameDocument = frameWindow?.document
-  if (!frameWindow || !frameDocument) {
-    iframe.remove()
-    return
-  }
-
-  frameWindow.addEventListener('afterprint', () => iframe.remove(), { once: true })
-  const rows = (order.lines ?? [])
-    .map((line) => {
-      const setCode = line.setCode ? line.setCode.toUpperCase() : '-'
-      const collectorNumber = line.collectorNumber ?? '-'
-      const lineTotal = formatPrice(line.quantity * line.priceCents)
-      return `
-        <tr>
-          <td>${escapeHtml(line.cardName)}</td>
-          <td>${escapeHtml(setCode)}</td>
-          <td>${escapeHtml(collectorNumber)}</td>
-          <td>${line.quantity}</td>
-          <td>${formatPrice(line.priceCents)}</td>
-          <td>${lineTotal}</td>
-        </tr>
-      `
-    })
-    .join('')
-
-  frameDocument.open()
-  frameDocument.write(`
-    <!doctype html>
-    <html>
-      <head>
-        <title>Order ${escapeHtml(order.reference)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body { color: #111827; font-family: Arial, sans-serif; margin: 32px; }
-          header { border-bottom: 2px solid #111827; margin-bottom: 24px; padding-bottom: 16px; }
-          h1 { font-size: 28px; margin: 0 0 8px; }
-          .muted { color: #4b5563; }
-          .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin-bottom: 24px; }
-          .box { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; }
-          .label { color: #6b7280; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-          .value { font-size: 14px; font-weight: 700; margin-top: 4px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; vertical-align: top; }
-          th { color: #4b5563; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-          td:nth-child(4), td:nth-child(5), td:nth-child(6), th:nth-child(4), th:nth-child(5), th:nth-child(6) { text-align: right; }
-          .totals { margin-left: auto; margin-top: 20px; width: 320px; }
-          .total-row { align-items: baseline; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; padding: 8px 0; }
-          .total-row.final { border-bottom: 0; font-weight: 700; }
-          .total-row.final strong { font-size: 24px; }
-          .tax-note { color: #6b7280; font-size: 12px; margin-top: 8px; text-align: right; }
-          @media print { body { margin: 18mm; } button { display: none; } }
-        </style>
-      </head>
-      <body>
-        <header>
-          <h1>Order Sheet</h1>
-          <div class="muted">${escapeHtml(order.reference)} · ${escapeHtml(formatOrderDate(order.createdAt))}</div>
-        </header>
-
-        <section class="grid">
-          <div class="box">
-            <div class="label">Customer</div>
-            <div class="value">${escapeHtml(order.customerName ?? 'Customer')}</div>
-            <div class="muted">${escapeHtml(order.customerEmail ?? '-')}</div>
-          </div>
-          <div class="box">
-            <div class="label">Status</div>
-            <div class="value">${escapeHtml(ORDER_STATUS_LABELS[order.status])}</div>
-            <div class="muted">${orderItemCount(order)} ${orderItemCount(order) === 1 ? 'item' : 'items'}</div>
-          </div>
-        </section>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Card</th>
-              <th>Set</th>
-              <th>Collector #</th>
-              <th>Qty</th>
-              <th>Unit</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <div class="totals">
-          <div class="total-row">
-            <span>Pre-tax total</span>
-            <strong>${formatPrice(preTaxTotalCents)}</strong>
-          </div>
-          <div class="total-row">
-            <span>Tax</span>
-            <strong>${formatPrice(taxCents)}</strong>
-          </div>
-          <div class="total-row final">
-            <span>Post-tax total</span>
-            <strong>${formatPrice(postTaxTotalCents)}</strong>
-          </div>
-          <div class="tax-note">Tax is not calculated yet, so post-tax total currently matches pre-tax total.</div>
-        </div>
-      </body>
-    </html>
-  `)
-  frameDocument.close()
-
-  window.setTimeout(() => {
-    frameWindow.focus()
-    frameWindow.print()
-    window.setTimeout(() => iframe.remove(), 1000)
-  }, 100)
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;')
 }
 
 function OrderMetric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {

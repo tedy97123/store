@@ -11,6 +11,8 @@ use Doctrine\ORM\Mapping as ORM;
 class CustomerNotification
 {
     public const TYPE_ORDER_FULFILLED = 'order_fulfilled';
+    public const TYPE_ORDER_CANCELLED = 'order_cancelled';
+    public const TYPE_ORDER_REFUNDED = 'order_refunded';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]

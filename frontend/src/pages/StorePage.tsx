@@ -23,21 +23,17 @@ import { StoreHero } from '../components/store/StoreHero'
 import { cx } from '../lib/cx'
 import { MANA_COLORS } from '../lib/mtg'
 import {
-    QUICK_ACTIONS,
-    SORTS,
-    FINISH_OPTIONS,
-    COLORS,
-    DEFAULT_SPOTLIGHT_MIN_PRICE_CENTS,
-    SPOTLIGHT_MAX_ITEMS,
-    RESULTS_PAGE_SIZE,
-    type FinishFilter,
-    type ViewMode,
-    type SortKey
- } from './utils/actionsUtil.tsx'
-
-
-
-
+  COLORS,
+  DEFAULT_SPOTLIGHT_MIN_PRICE_CENTS,
+  FINISH_OPTIONS,
+  QUICK_ACTIONS,
+  RESULTS_PAGE_SIZE,
+  SORTS,
+  SPOTLIGHT_MAX_ITEMS,
+  type FinishFilter,
+  type SortKey,
+  type ViewMode,
+} from './utils/storePageConstants'
 
 function cardColors(item: InventoryItem): string[] {
   const identity = item.card.colorIdentity ?? item.card.colors ?? []
@@ -204,22 +200,16 @@ export default function StorePage() {
   const advancedCount = (setFilter ? 1 : 0) + (oracleFilter.trim() ? 1 : 0) + (minPrice.trim() ? 1 : 0) + (maxPrice.trim() ? 1 : 0)
 
   const chips: { label: string; onClear: () => void }[] = []
-
   if (search.trim()) chips.push({ label: `“${search.trim()}”`, onClear: () => setSearch('') })
-
   if (setFilter) chips.push({ label: `Set: ${setFilter.toUpperCase()}`, onClear: () => setSetFilter('') })
-
   if (oracleFilter.trim()) chips.push({ label: `Text: ${oracleFilter.trim()}`, onClear: () => setOracleFilter('') })
-
   if (finishFilter !== 'all')
     chips.push({ label: FINISH_OPTIONS.find((f) => f.key === finishFilter)!.label, onClear: () => setFinishFilter('all') })
   for (const c of selectedColors) {
     const label = COLORS.find((x) => x.key === c)?.label ?? c
     chips.push({ label, onClear: () => toggleColor(c) })
   }
-
   if (minPrice.trim()) chips.push({ label: `Min $${minPrice.trim()}`, onClear: () => setMinPrice('') })
-
   if (maxPrice.trim()) chips.push({ label: `Max $${maxPrice.trim()}`, onClear: () => setMaxPrice('') })
 
   function renderFilterControls(searchId: string) {

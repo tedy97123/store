@@ -15,5 +15,6 @@ export {
   useCustomerCart,
   useCustomerOrders,
   useCustomerNotifications,
+  useMarkNotificationRead,
 } from './useCustomer'
 export { useCart } from './useCart'

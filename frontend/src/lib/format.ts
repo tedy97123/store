@@ -5,3 +5,9 @@ export function formatDate(value?: string): string {
   if (!value) return '-'
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
+
+/** Localized date + time; returns "-" for missing/blank input. */
+export function formatDateTime(value?: string): string {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}

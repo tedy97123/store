@@ -51,7 +51,9 @@ use Symfony\Component\Validator\Constraints as Assert;
                 'id' => new Link(fromClass: Order::class),
             ],
             normalizationContext: ['groups' => ['order:read']],
-            denormalizationContext: ['groups' => ['order:write']],
+            // Status only: the PATCH endpoint exists to move an order through
+            // its workflow, not to rewrite customer details on a placed order.
+            denormalizationContext: ['groups' => ['order:status']],
             security: "is_granted('STORE_MANAGE', object.getStore())",
             provider: StoreOrderItemProvider::class,
             processor: StoreOrderStatusProcessor::class,
@@ -86,7 +88,7 @@ class Order
     private string $reference = '';
 
     #[ORM\Column(enumType: OrderStatus::class)]
-    #[Groups(['order:read', 'order:write'])]
+    #[Groups(['order:read', 'order:write', 'order:status'])]
     private OrderStatus $status = OrderStatus::PENDING;
 
     #[ORM\Column(length: 255, nullable: true)]
@@ -124,6 +126,12 @@ class Order
     {
         $this->createdAt = new \DateTimeImmutable();
         $this->lines = new ArrayCollection();
+    }
+
+    /** Single source of truth for the human-facing order reference format. */
+    public static function generateReference(): string
+    {
+        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
     }
 
     public function getId(): ?int

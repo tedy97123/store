@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../api/client'
 import type { CartItem, CustomerFavorite, CustomerNotification, CustomerWantListEntry, Order, StoreCustomer } from '../api/types'
 
@@ -79,11 +79,25 @@ export function useCustomerNotifications(slug: string, enabled = true) {
       return data
     },
     enabled: Boolean(slug) && enabled,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnReconnect: 'always',
-    refetchOnWindowFocus: 'always',
-    refetchInterval: 15000,
-    refetchIntervalInBackground: true,
+    // Poll while the tab is visible; the default refetch-on-focus covers the
+    // return from a hidden tab, so no background polling is needed.
+    refetchInterval: 15_000,
+  })
+}
+
+/**
+ * Mark a notification read. Shared by the navbar bell and the account page so
+ * both surfaces invalidate the same cache. Gate spinners on
+ * `isPending && variables === id` — `variables` persists after the mutation
+ * settles.
+ */
+export function useMarkNotificationRead(slug: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await api.patch(`/stores/${slug}/customer/notifications/${id}/read`)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.notifications(slug) }),
   })
 }
