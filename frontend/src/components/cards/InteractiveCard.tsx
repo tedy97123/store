@@ -27,7 +27,10 @@ export function InteractiveCard({ image, alt, foil = false, accent = '#6d5efc', 
 
   return (
     <div ref={ref} className={cx('[perspective:1000px]', className)} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
-      <div className={cx('tilt-card relative overflow-hidden rounded-2xl border-2', shadow && 'shadow-card')} style={{ borderColor: accent }}>
+      <div
+        className={cx('tilt-card relative overflow-hidden rounded-2xl border-2', foil && 'foil-card', shadow && 'shadow-card')}
+        style={{ borderColor: accent }}
+      >
         {image ? (
           <img src={image} alt={alt} loading="lazy" decoding="async" className="block w-full select-none" draggable={false} />
         ) : (

@@ -2,6 +2,7 @@ import { Pencil, Sparkles, Trash2 } from 'lucide-react'
 import { cardImage, formatPrice, formatScryfallPrice } from '../../../api/client'
 import type { InventoryItem } from '../../../api/types'
 import { Badge, Button } from '../../../components/ui'
+import { cx } from '../../../lib/cx'
 import { FOIL_GRADIENT, rarityAccent } from '../../../lib/mtg'
 
 export interface InventoryResultCardProps {
@@ -18,7 +19,7 @@ export function InventoryResultCard({ item, onEdit, onDelete, deleting }: Invent
   return (
     <div className="group flex gap-4 rounded-card border border-border bg-surface p-4 shadow-card transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgb(16_24_40_/0.25)]">
       <div
-        className="relative h-40 w-[7rem] flex-shrink-0 overflow-hidden rounded-btn border-2 bg-black/90"
+        className={cx('relative h-40 w-[7rem] flex-shrink-0 overflow-hidden rounded-btn border-2 bg-black/90', item.isFoil && 'foil-card')}
         style={{ borderColor: accent }}
       >
         {image ? (

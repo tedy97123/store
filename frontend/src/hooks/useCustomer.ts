@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import api from '../api/client'
-import type { CartItem, CustomerFavorite, CustomerWantListEntry, StoreCustomer } from '../api/types'
+import type { CartItem, CustomerFavorite, CustomerNotification, CustomerWantListEntry, Order, StoreCustomer } from '../api/types'
 
 /**
  * Centralized React Query keys + fetchers for a customer's per-store data.
@@ -12,6 +12,8 @@ export const customerKeys = {
   favorites: (slug: string) => ['customer-favorites', slug] as const,
   wantList: (slug: string) => ['customer-want-list', slug] as const,
   cart: (slug: string) => ['customer-cart', slug] as const,
+  orders: (slug: string) => ['customer-orders', slug] as const,
+  notifications: (slug: string) => ['customer-notifications', slug] as const,
 }
 
 export function useCustomerProfile(slug: string, enabled = true) {
@@ -55,5 +57,33 @@ export function useCustomerCart(slug: string, enabled = true) {
       return data
     },
     enabled: Boolean(slug) && enabled,
+  })
+}
+
+export function useCustomerOrders(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: customerKeys.orders(slug),
+    queryFn: async () => {
+      const { data } = await api.get<Order[]>(`/stores/${slug}/customer/orders`)
+      return data
+    },
+    enabled: Boolean(slug) && enabled,
+  })
+}
+
+export function useCustomerNotifications(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: customerKeys.notifications(slug),
+    queryFn: async () => {
+      const { data } = await api.get<CustomerNotification[]>(`/stores/${slug}/customer/notifications`)
+      return data
+    },
+    enabled: Boolean(slug) && enabled,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnReconnect: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 15000,
+    refetchIntervalInBackground: true,
   })
 }

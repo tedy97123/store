@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useMatch } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useCustomerCart, useTheme } from '../../hooks'
+import { NotificationBell } from '../notifications/NotificationBell'
 import { Avatar, Button, buttonVariants } from '../ui'
 import { ChevronDown, LogIn, LogOut, Menu, Moon, ShoppingCart, Store, Sun, UserCircle, UserPlus, X } from 'lucide-react'
 
@@ -12,7 +13,8 @@ export default function AppLayout() {
   // The customer profile + cart are per-store, so only surface those links when
   // the current route is within a store (e.g. /s/:slug, /s/:slug/cards/:id).
   const storeMatch = useMatch('/s/:slug/*')
-  const storeSlug = storeMatch?.params.slug
+  const exactStoreMatch = useMatch('/s/:slug')
+  const storeSlug = storeMatch?.params.slug ?? exactStoreMatch?.params.slug
 
   // Live cart count for the active store, so the navbar badge stays in sync.
   const { data: cart = [] } = useCustomerCart(storeSlug ?? '', Boolean(user && storeSlug))
@@ -207,6 +209,7 @@ export default function AppLayout() {
           </nav>
 
           {/* Cart — always visible top-right when inside a store */}
+          {user && storeSlug && <NotificationBell slug={storeSlug} />}
           {cartLink}
 
           {/* Theme toggle (desktop) */}
