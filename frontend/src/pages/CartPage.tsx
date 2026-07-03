@@ -437,8 +437,7 @@ function CartLine({
         {item.isFoil && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-50 mix-blend-color-dodge"
-            style={{ backgroundImage: FOIL_GRADIENT, backgroundSize: '200% 200%' }}
+            className="foil-shimmer pointer-events-none absolute inset-0"
           />
         )}
       </Link>

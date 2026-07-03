@@ -17,17 +17,19 @@ export function InventoryResultCard({ item, onEdit, onDelete, deleting }: Invent
   const image = cardImage(item.card)
   return (
     <div className="group flex gap-4 rounded-card border border-border bg-surface p-4 shadow-card transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgb(16_24_40_/0.25)]">
-      <div className="relative h-32 w-[5.5rem] flex-shrink-0 overflow-hidden rounded-btn border-2" style={{ borderColor: accent }}>
+      <div
+        className="relative h-40 w-[7rem] flex-shrink-0 overflow-hidden rounded-btn border-2 bg-black/90"
+        style={{ borderColor: accent }}
+      >
         {image ? (
-          <img src={image} alt={item.card.name} className="h-full w-full object-cover" />
+          <img src={image} alt={item.card.name} loading="lazy" decoding="async" className="h-full w-full object-contain" />
         ) : (
           <div className="grid h-full place-items-center px-2 text-center text-xs text-fg-muted">No image</div>
         )}
         {item.isFoil && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-50 mix-blend-color-dodge"
-            style={{ backgroundImage: FOIL_GRADIENT, backgroundSize: '200% 200%' }}
+            className="foil-shimmer pointer-events-none absolute inset-0"
           />
         )}
       </div>
