@@ -1,17 +1,20 @@
 # Stores & branding
 
-Covers the public store directory, the storefront-by-slug page, the branding/theme editor, and platform-admin management of stores and users.
+Covers the public store directory, storefront-by-slug page, branding/theme editor, store payment connections, and platform-admin management of stores and users.
 
-`Store` is an **API Platform resource** (`#[ApiResource]` on `src/Entity/Store.php`) — its GET operations use State Providers and its admin writes use a State Processor. Branding updates go through a **custom controller** instead.
+`Store` is an API Platform resource. Public GET operations use state providers, admin writes use `StoreAdminProcessor`, and owner-managed branding/settings writes go through `StoreSettingsController`.
 
 | Operation | Route | Backend |
 |-----------|-------|---------|
 | List active stores | `GET /api/stores` | `ActiveStoreCollectionProvider` |
 | Store by slug | `GET /api/stores/{slug}` | `StoreBySlugProvider` |
-| Admin list stores | `GET /api/admin/stores` | API Platform default (super-admin) |
+| Admin list stores | `GET /api/admin/stores` | API Platform default, super-admin only |
 | Admin create store | `POST /api/admin/stores` | `StoreAdminProcessor` |
 | Admin update store | `PATCH /api/admin/stores/{id}` | `StoreAdminProcessor` |
 | Update branding/settings | `PATCH /api/stores/{slug}/settings` | `StoreSettingsController` |
+| Payment status | `GET /api/stores/{slug}/payments` | `StorePaymentController` |
+| Square connect/disconnect | `POST /api/stores/{slug}/payments/square/connect`, `POST /api/stores/{slug}/payments/square/disconnect` | `StorePaymentController` |
+| Square OAuth callback | `GET /api/integrations/square/callback` | `StorePaymentController` |
 
 ---
 
@@ -19,14 +22,14 @@ Covers the public store directory, the storefront-by-slug page, the branding/the
 
 ```mermaid
 flowchart LR
-    hp["🖥️ HomePage.tsx<br/>useQuery(['stores'])<br/>api.get('/stores')"] -->|"GET /api/stores"| rt["🌐 GET /api/stores"]
-    rt --> p["🎛️ ActiveStoreCollectionProvider::provide()"]
-    p --> repo["🗄️ StoreRepository::findActiveStores()"]
-    repo --> db[("stores<br/>SELECT WHERE is_active = true<br/>ORDER BY name")]
-    p -->|"Store[] (store:read)"| hp
+    hp["HomePage.tsx<br/>useQuery(['stores'])"] --> rt["GET /api/stores"]
+    rt --> p["ActiveStoreCollectionProvider::provide()"]
+    p --> repo["StoreRepository::findActiveStores()"]
+    repo --> db["stores SELECT active ORDER BY name"]
+    p --> hp
 ```
 
-Public, no auth. Returns active stores serialized with the `store:read` group (name, slug, branding fields).
+Public, no auth. Returns active stores serialized with the `store:read` group, including public branding fields.
 
 ---
 
@@ -34,29 +37,35 @@ Public, no auth. Returns active stores serialized with the `store:read` group (n
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ StorePage.tsx"]
-        us["useStore(slug)<br/>api.get('/stores/{slug}')"]
-        ut["useStoreTheme(store)<br/>→ storeThemeVars() CSS vars"]
-        inv["api.get('/stores/{slug}/inventory')"]
-        hero["StoreHero (branded)"]
+    subgraph FE["StorePage.tsx"]
+        us["useStore(slug)"]
+        theme["useStoreTheme(store)<br/>storeThemeVars()"]
+        inv["useInventory(slug)"]
+        hero["StoreHero"]
+        cards["Card grid/list"]
     end
-    us -->|"GET /api/stores/{slug}"| rt["🌐 GET /api/stores/{slug}"]
-    rt --> prov["🎛️ StoreBySlugProvider::provide()"]
-    prov --> repo["🗄️ StoreRepository::findOneBySlug()"]
-    repo --> db[("stores<br/>SELECT WHERE slug = ?<br/>(404 if missing)")]
-    prov -->|"Store"| us
-    us --> ut --> hero
-    inv -. "see catalog-and-inventory.md" .-> hero
+    us --> rt["GET /api/stores/{slug}"]
+    rt --> prov["StoreBySlugProvider::provide()"]
+    prov --> repo["StoreRepository::findOneBySlug()"]
+    repo --> db["stores SELECT slug"]
+    us --> theme --> hero
+    us --> cards
+    inv --> cards
 ```
 
-The store's branding columns (colors, logo, hero text) become CSS custom properties via `lib/storeTheme.ts`, so the storefront is themed per tenant. Inventory is fetched separately (see [catalog-and-inventory.md](catalog-and-inventory.md#browse-store-inventory)).
+The store's branding columns become CSS custom properties and rendering options. `cardDisplayStyle` controls how inventory cards render on the storefront:
+
+- `gallery` - compact image-first grid.
+- `marketplace` - card-detail layout with add-to-cart action.
+
+Inventory is fetched separately; see [catalog-and-inventory.md](catalog-and-inventory.md#browse-store-inventory).
 
 | Layer | Where |
 |-------|-------|
-| Frontend | `pages/StorePage.tsx`, `hooks/useStore.ts`, `hooks/useStoreTheme.ts`, `lib/storeTheme.ts`, `components/store/StoreHero.tsx` |
+| Frontend | `pages/StorePage.tsx`, `hooks/useStore.ts`, `hooks/useStoreTheme.ts`, `lib/storeTheme.ts`, `components/store/StoreHero.tsx`, `components/cards/*` |
 | Route | `GET /api/stores/{slug}` |
 | Entry | `State/StoreBySlugProvider.php` |
-| Repo/DB | `StoreRepository::findOneBySlug` → `stores` (read) |
+| Repo/DB | `StoreRepository::findOneBySlug` -> `stores` |
 
 ---
 
@@ -64,21 +73,24 @@ The store's branding columns (colors, logo, hero text) become CSS custom propert
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ BrandingTab.tsx"]
-        form["BrandingForm (colors, urls, hero text,<br/>spotlightMinPriceCents)"]
-        prev["StorePreview (live theme preview)"]
-        mut["useMutation → api.patch('/stores/{slug}/settings')"]
+    subgraph FE["BrandingTab.tsx"]
+        form["Branding form<br/>colors, urls, hero text,<br/>spotlightMinPriceCents, cardDisplayStyle"]
+        preview["Live preview"]
+        mut["api.patch('/stores/{slug}/settings')"]
     end
-    form --> mut -->|"PATCH /api/stores/{slug}/settings"| rt["🌐 PATCH .../settings"]
-    rt --> c["🎛️ StoreSettingsController::update()"]
-    c --> g{"denyAccessUnlessGranted<br/>STORE_MANAGE"}
-    g -->|ok| upd["⚙️ StoreSettingsUpdater::update()<br/>validates hex colors / urls / lengths"]
-    upd --> db[("🗄️ stores<br/>UPDATE branding + spotlight cols")]
-    upd -->|"serialized Store"| mut
+    form --> mut
+    mut --> rt["PATCH /api/stores/{slug}/settings"]
+    rt --> ctl["StoreSettingsController::update()"]
+    ctl --> voter["STORE_MANAGE voter"]
+    voter --> updater["StoreSettingsUpdater::update()"]
+    updater --> db["stores UPDATE branding/settings"]
+    updater --> mut
+    form --> preview
 ```
 
-- Validation lives in `StoreSettingsUpdater`: colors must match `#RRGGBB`, URLs must start with `http(s):` or `/`, text fields have max lengths. Invalid input → `422`.
+- Validation lives in `StoreSettingsUpdater`: colors must match `#RRGGBB`, URLs must start with `http(s):` or `/`, text fields have max lengths, and `cardDisplayStyle` must be `gallery` or `marketplace`.
 - `StoreVoter` gates the write: store owner or super-admin only.
+- The branding tab saves `cardDisplayStyle` immediately when the owner changes the display option, then keeps the local store query cache in sync with the returned store payload.
 
 | Layer | Where |
 |-------|-------|
@@ -86,41 +98,81 @@ flowchart LR
 | Route | `PATCH /api/stores/{slug}/settings` |
 | Entry | `Controller/StoreSettingsController::update()` |
 | Service | `Service/Store/StoreSettingsUpdater` |
-| DB | `stores` (read + update) |
+| DB | `stores` |
 
 ---
 
-## Platform admin — stores & users
+## Store payment connections
+
+Payment provider connections belong to the store owner. Provider tokens are stored on `store_payment_accounts`, encrypted before persistence, and are never returned by the API. Platform administrators should not receive provider credentials.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Owner
+    participant FE as PaymentsTab.tsx
+    participant API as StorePaymentController
+    participant State as SignedOAuthState
+    participant Square as Square OAuth
+    participant DB as PostgreSQL
+
+    Owner->>FE: Connect Square
+    FE->>API: POST /stores/{slug}/payments/square/connect
+    API->>State: create signed state
+    API-->>FE: authorizationUrl
+    FE->>Square: redirect owner
+    Square->>API: GET /api/integrations/square/callback
+    API->>State: verify state
+    API->>Square: exchange code for token
+    API->>DB: upsert store_payment_accounts
+    API-->>FE: redirect /s/{slug}/admin/payments?square=connected
+```
+
+- `GET /api/stores/{slug}/payments` returns sanitized provider status only.
+- `POST /payments/square/connect` requires `STORE_MANAGE` and returns an authorization URL when `SQUARE_APPLICATION_ID` and `SQUARE_APPLICATION_SECRET` are configured.
+- `POST /payments/square/disconnect` revokes the Square token when possible, then clears encrypted tokens and marks the account disconnected.
+- The callback verifies signed OAuth state before writing the connection, so a Square response can only attach to the store/user that initiated it.
+- PayPal is not implemented yet. The table and UI are provider-shaped so PayPal can follow the same status/connect/disconnect pattern later.
+- Real checkout payment capture is future work. Local test orders intentionally bypass Square.
+
+| Layer | Where |
+|-------|-------|
+| Frontend | `pages/store-admin/PaymentsTab.tsx` |
+| Routes | `Controller/StorePaymentController.php` |
+| Provider client | `Service/Payments/SquareOAuthClient.php` |
+| OAuth state | `Service/Payments/SignedOAuthState.php` |
+| Secret handling | `Service/Security/SecretCipher.php` |
+| Repo/DB | `StorePaymentAccountRepository` -> `store_payment_accounts` |
+
+---
+
+## Platform admin - stores & users
 
 ```mermaid
 flowchart LR
-    subgraph FE["🖥️ PlatformAdminPage.tsx"]
-        ls["useQuery(['admin-stores'])<br/>api.get('/admin/stores')"]
-        lu["useQuery(['admin-users'])<br/>api.get('/admin/users')"]
-        cs["create store form<br/>api.post('/admin/stores')"]
+    subgraph FE["PlatformAdminPage.tsx"]
+        stores["GET /admin/stores"]
+        users["GET /admin/users"]
+        create["POST /admin/stores"]
+        editUser["POST/PATCH /admin/users"]
     end
-    subgraph API["🌐 Routes (ROLE_SUPER_ADMIN)"]
-        r1["GET /api/admin/stores"]
-        r2["GET /api/admin/users"]
-        r3["POST /api/admin/stores"]
-        r4["POST/PATCH /api/admin/users"]
-    end
-    ls --> r1 --> dstore[("🗄️ stores SELECT *")]
-    lu --> r2 --> duser[("🗄️ users SELECT *")]
-    cs --> r3 --> sap["🎛️ StoreAdminProcessor::process()"]
-    sap --> promote["promote owner → ROLE_STORE_OWNER"]
-    sap --> wstore[("🗄️ stores INSERT/UPDATE<br/>+ users UPDATE roles")]
-    r4 --> uap["🎛️ UserAdminProcessor::process()<br/>hash plainPassword if set"]
-    uap --> wuser[("🗄️ users INSERT/UPDATE")]
+    stores --> dstore["stores SELECT all"]
+    users --> duser["users SELECT all"]
+    create --> sap["StoreAdminProcessor::process()"]
+    sap --> promote["promote owner to ROLE_STORE_OWNER"]
+    sap --> wstore["stores INSERT/UPDATE + users UPDATE roles"]
+    editUser --> uap["UserAdminProcessor::process()"]
+    uap --> wuser["users INSERT/UPDATE"]
 ```
 
-- All `/api/admin/*` operations require `ROLE_SUPER_ADMIN` (enforced by `security.yaml` **and** API Platform `security:` on each operation). The `TenantFilter` is disabled for these routes.
-- Creating a store via `StoreAdminProcessor` also **promotes the chosen owner** to `ROLE_STORE_OWNER`.
-- `UserAdminProcessor` hashes `plainPassword` (write-only field) before persisting.
+- All `/api/admin/*` operations require `ROLE_SUPER_ADMIN`.
+- The tenant filter is disabled for admin routes so platform administrators can manage all stores.
+- Creating a store through `StoreAdminProcessor` promotes the chosen owner to `ROLE_STORE_OWNER`.
+- `UserAdminProcessor` hashes `plainPassword` before persisting.
 
 | Layer | Where |
 |-------|-------|
 | Frontend | `pages/PlatformAdminPage.tsx` |
 | Routes | `GET/POST /api/admin/stores`, `PATCH /api/admin/stores/{id}`, `GET/POST/PATCH /api/admin/users[/{id}]` |
 | Entry | `State/StoreAdminProcessor.php`, `State/UserAdminProcessor.php`, API Platform default collection providers |
-| DB | `stores`, `users` (read/insert/update) |
+| DB | `stores`, `users` |

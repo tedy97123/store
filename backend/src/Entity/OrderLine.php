@@ -104,4 +104,23 @@ class OrderLine
 
         return $this;
     }
+
+    /** @return array<string, mixed>|null */
+    #[Groups(['order:read'])]
+    public function getImageUris(): ?array
+    {
+        return $this->card?->getImageUris();
+    }
+
+    #[Groups(['order:read'])]
+    public function getSetCode(): ?string
+    {
+        return $this->card?->getSetCode();
+    }
+
+    #[Groups(['order:read'])]
+    public function getCollectorNumber(): ?string
+    {
+        return $this->card?->getCollectorNumber();
+    }
 }

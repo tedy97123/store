@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext'
 import {
   customerKeys,
   useCustomerFavorites,
+  useCustomerNotifications,
+  useCustomerOrders,
   useCustomerProfile,
   useCustomerWantList,
   useDebouncedValue,
@@ -33,9 +35,11 @@ import {
   TabPanel,
   Textarea,
 } from '../components/ui'
-import { Heart, ImageOff, ListPlus, Plus, Save, Search, Trash2, User, X } from 'lucide-react'
+import { Heart, ImageOff, ListPlus, Plus, ReceiptText, Save, Search, Trash2, User, X } from 'lucide-react'
+import { CustomerOrderCard } from '../components/orders/CustomerOrderCard'
+import { NotificationList } from '../components/notifications/NotificationList'
 
-type TabId = 'profile' | 'favorites' | 'wantlist'
+type TabId = 'profile' | 'orders' | 'favorites' | 'wantlist'
 
 export default function CustomerProfilePage() {
   const { slug = '' } = useParams()
@@ -46,9 +50,12 @@ export default function CustomerProfilePage() {
 
   const favoritesQuery = useCustomerFavorites(slug)
   const wantListQuery = useCustomerWantList(slug)
+  const ordersQuery = useCustomerOrders(slug)
+  const notificationsQuery = useCustomerNotifications(slug)
 
   const favoritesCount = favoritesQuery.data?.length ?? 0
   const wantListCount = wantListQuery.data?.length ?? 0
+  const ordersCount = ordersQuery.data?.length ?? 0
 
   return (
     <div className="space-y-6">
@@ -74,12 +81,15 @@ export default function CustomerProfilePage() {
         </CardBody>
       </Card>
 
+      <NotificationsPanel slug={slug} query={notificationsQuery} />
+
       <Tabs
         aria-label="Account sections"
         value={tab}
         onChange={(id) => setTab(id as TabId)}
         tabs={[
           { id: 'profile', label: 'Profile', icon: User },
+          { id: 'orders', label: `Orders (${ordersCount})`, icon: ReceiptText },
           { id: 'favorites', label: `Favorites (${favoritesCount})`, icon: Heart },
           { id: 'wantlist', label: `Want list (${wantListCount})`, icon: ListPlus },
         ]}
@@ -88,6 +98,9 @@ export default function CustomerProfilePage() {
       <TabPanel when="profile" value={tab}>
         <ProfilePanel slug={slug} />
       </TabPanel>
+      <TabPanel when="orders" value={tab}>
+        <OrdersPanel slug={slug} query={ordersQuery} />
+      </TabPanel>
       <TabPanel when="favorites" value={tab}>
         <FavoritesPanel slug={slug} query={favoritesQuery} />
       </TabPanel>
@@ -95,6 +108,42 @@ export default function CustomerProfilePage() {
         <WantListPanel slug={slug} query={wantListQuery} />
       </TabPanel>
     </div>
+  )
+}
+
+function NotificationsPanel({
+  slug,
+  query,
+}: {
+  slug: string
+  query: ReturnType<typeof useCustomerNotifications>
+}) {
+  const queryClient = useQueryClient()
+  const notifications = (query.data ?? []).filter((notification) => !notification.readAt)
+
+  const markRead = useMutation({
+    mutationFn: async (id: number) => {
+      await api.patch(`/stores/${slug}/customer/notifications/${id}/read`)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.notifications(slug) }),
+  })
+
+  if (query.isLoading || notifications.length === 0) return null
+
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div>
+          <p className="font-bold text-fg">Notifications</p>
+          <p className="text-sm text-fg-muted">Order updates from this store.</p>
+        </div>
+        <NotificationList
+          notifications={notifications}
+          pendingId={markRead.variables}
+          onMarkRead={(id) => markRead.mutate(id)}
+        />
+      </CardBody>
+    </Card>
   )
 }
 
@@ -246,6 +295,53 @@ function ProfilePanel({ slug }: { slug: string }) {
         )}
       </div>
     </form>
+  )
+}
+
+/* ------------------------------ Orders ------------------------------ */
+
+function OrdersPanel({
+  slug,
+  query,
+}: {
+  slug: string
+  query: ReturnType<typeof useCustomerOrders>
+}) {
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+
+  if (query.isLoading) return <LoadingPanel label="Loading orders..." />
+  if (query.isError) return <ErrorState title="Could not load orders." onRetry={() => void query.refetch()} />
+
+  const orders = query.data ?? []
+  if (orders.length === 0) {
+    return (
+      <EmptyState
+        icon={ReceiptText}
+        title="No past orders yet"
+        description="Orders you place with this store will appear here."
+        action={
+          <Link to={`/s/${slug}`} className="text-sm font-medium text-brand-600 hover:text-brand-700">
+            Browse the store
+          </Link>
+        }
+      />
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Past orders" subtitle="Track order status and review previous purchases." />
+      <CardBody className="grid gap-3 bg-bg/40">
+        {orders.map((order) => (
+          <CustomerOrderCard
+            key={order.id}
+            order={order}
+            expanded={expandedId === order.id}
+            onToggle={() => setExpandedId(expandedId === order.id ? null : order.id)}
+          />
+        ))}
+      </CardBody>
+    </Card>
   )
 }
 

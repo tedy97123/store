@@ -257,14 +257,39 @@ export interface OrderLine {
   cardName: string
   quantity: number
   priceCents: number
+  imageUrl?: string | null
+  imageUris?: {
+    normal?: string
+    small?: string
+    large?: string
+    png?: string
+  } | null
+  setCode?: string | null
+  collectorNumber?: string | null
 }
 
 export interface Order {
   id: number
   reference: string
-  status: string
+  status: OrderStatus
+  storeName?: string | null
+  storeSlug?: string | null
   customerName?: string
+  customerEmail?: string
   totalCents: number
   createdAt: string
   lines?: OrderLine[]
+}
+
+export type OrderStatus = 'pending' | 'received' | 'fulfilled' | 'paid' | 'shipped' | 'completed' | 'cancelled' | 'refunded'
+
+export interface CustomerNotification {
+  id: number
+  type: string
+  title: string
+  body: string
+  orderId?: number | null
+  orderReference?: string | null
+  createdAt: string
+  readAt?: string | null
 }

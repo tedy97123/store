@@ -1,35 +1,36 @@
 # Architecture
 
-End-to-end maps of every feature in the MTG Store platform — from the React page a user clicks, through the HTTP route, backend entry point, services, repositories, and finally the database rows that change.
+End-to-end maps of the MTG Store platform, from the React page a user clicks, through the HTTP route, backend entry point, services, repositories, and database rows.
 
-Each diagram is rendered with [Mermaid](https://mermaid.js.org/) (GitHub renders these natively). Every feature doc pairs a **flow diagram** with a **"where to go" table** listing the exact classes/files at each layer, so you can jump straight to the code.
+Each feature doc pairs flow diagrams with a "where to go" table listing the exact classes/files at each layer.
 
 ## How to read these docs
 
-Every request flows through the same five layers. Diagrams are labelled by layer:
+Every request generally flows through these layers:
 
 | Layer | What lives here | Backend location |
 |-------|-----------------|------------------|
-| 🖥️ **Frontend** | React page → hook (TanStack Query) → axios call | `frontend/src/` |
-| 🌐 **HTTP route** | Method + path | Symfony controller `#[Route]` or API Platform `uriTemplate` |
-| 🎛️ **Backend entry** | Controller action **or** API Platform State Provider (reads) / Processor (writes) | `src/Controller/`, `src/State/` |
-| ⚙️ **Service** | Business logic, external APIs | `src/Service/` |
-| 🗄️ **Repository → DB** | Doctrine queries + row mutations | `src/Repository/`, PostgreSQL |
+| Frontend | React page -> hook -> axios call | `frontend/src/` |
+| HTTP route | Method + path | Symfony controller `#[Route]` or API Platform `uriTemplate` |
+| Backend entry | Controller action or API Platform provider/processor | `src/Controller/`, `src/State/` |
+| Service | Business logic, external APIs | `src/Service/` |
+| Repository -> DB | Doctrine queries and row mutations | `src/Repository/`, PostgreSQL |
 
-**Two backend styles coexist:**
-- **Custom controllers** (`src/Controller/*`) — used for auth, store settings, customer accounts, and CSV import.
-- **API Platform resources** — entities (`Store`, `InventoryItem`, `Order`) declare `#[ApiResource]` operations that delegate to **State Providers** (GET) and **State Processors** (POST/PATCH/DELETE) in `src/State/`.
+Two backend styles coexist:
+
+- Custom controllers in `src/Controller/*` for auth, store settings, payment connections, customer account features, CSV import, and customer notifications.
+- API Platform resources for entities such as `Store`, `InventoryItem`, and `Order`, with state providers/processors in `src/State/`.
 
 ## Feature index
 
 | Domain | What it covers | Doc |
 |--------|----------------|-----|
-| **Data model** | All tables, columns, foreign keys, the ER diagram, and the multi-tenancy pattern | [data-model.md](data-model.md) |
-| **Auth & tenancy** | Login, register, `/me`, JWT mechanics, role-based access (voters), the tenant SQL filter | [auth-and-tenancy.md](auth-and-tenancy.md) |
-| **Stores & branding** | Public store directory, storefront by slug, branding/theme editor, platform admin (stores & users) | [stores-and-branding.md](stores-and-branding.md) |
+| **Data model** | Tables, columns, foreign keys, ER diagram, and the multi-tenancy pattern | [data-model.md](data-model.md) |
+| **Auth & tenancy** | Login, register, `/me`, JWT mechanics, role-based access, and tenant SQL filtering | [auth-and-tenancy.md](auth-and-tenancy.md) |
+| **Stores & branding** | Public store directory, storefront by slug, branding/theme editor, store payment connections, platform admin | [stores-and-branding.md](stores-and-branding.md) |
 | **Catalog & inventory** | Card catalog search, inventory browse, inventory CRUD, Scryfall bulk sync, card details, spotlight | [catalog-and-inventory.md](catalog-and-inventory.md) |
 | **CSV import** | Async bulk import lifecycle, failed-row recovery, card resolution, inventory writes, and live polling | [csv-import.md](csv-import.md) |
-| **Customers & orders** | Per-store customer profiles, favorites, want lists, orders, and sales reports | [customers-and-orders.md](customers-and-orders.md) |
+| **Customers & orders** | Per-store customer profiles, favorites, want lists, cart, test checkout, order workflow, notifications, and reports | [customers-and-orders.md](customers-and-orders.md) |
 
 ## System context
 
@@ -37,39 +38,49 @@ Every request flows through the same five layers. Diagrams are labelled by layer
 flowchart LR
     user([Shopper / Store owner / Admin])
 
-    subgraph browser["🖥️ Browser — React 19 + Vite"]
-        spa["SPA (React Router)<br/>TanStack Query · axios"]
+    subgraph browser["Browser - React + Vite"]
+        spa["SPA<br/>React Router, TanStack Query, axios"]
     end
 
-    subgraph backend["⚙️ Symfony 8 API (127.0.0.1:8000)"]
-        api["API Platform + custom controllers<br/>JWT firewall · TenantSubscriber"]
-        worker["Messenger worker<br/>(messenger:consume async)"]
+    subgraph backend["Symfony API"]
+        api["API Platform + custom controllers<br/>JWT firewall, TenantSubscriber"]
+        worker["Messenger worker<br/>messenger:consume async"]
     end
 
-    subgraph data["🗄️ Data stores"]
-        pg[("PostgreSQL 16<br/>app tables + messenger_messages")]
+    subgraph data["Data stores"]
+        pg["PostgreSQL<br/>app tables + messenger_messages"]
     end
 
-    subgraph ext["🌩️ External"]
-        scry["Scryfall API<br/>(bulk + search)"]
-        mtg["MTGJSON<br/>(set fallback)"]
-        mail["Mailpit (SMTP, dev)"]
+    subgraph ext["External systems"]
+        scry["Scryfall API"]
+        mtg["MTGJSON"]
+        mail["Mailpit SMTP, dev"]
+        square["Square OAuth"]
     end
 
     user --> spa
-    spa -- "/api/* (Vite proxy)" --> api
+    spa -- "/api/* through Vite proxy" --> api
     api --> pg
     worker -- "reads queue" --> pg
     api -- "enqueue CSV job" --> pg
     worker -- "resolve cards" --> scry
     worker -- "resolve cards" --> mtg
     api -- "catalog search / sync" --> scry
-    api -. "email (planned)" .-> mail
+    api -- "fulfilled order email" --> mail
+    api -- "store payment connect" --> square
 ```
 
 ## Recurring patterns worth knowing
 
-- **Multi-tenancy** — `TenantSubscriber` reads `{slug}` from `/api/stores/{slug}/*`, resolves the `Store`, and enables a Doctrine SQL filter (`TenantFilter`) that auto-scopes `InventoryItem` and `Order` queries by `store_id`. `/api/admin/*` routes disable the filter so super-admins see everything. See [auth-and-tenancy.md](auth-and-tenancy.md#multi-tenancy-filter).
-- **Create-on-write** — customer profile / favorites / want-list `GET`s never mutate (return empty if no row); the `StoreCustomer` row is created lazily on first `PUT`/`POST`/`PATCH`. See [customers-and-orders.md](customers-and-orders.md).
-- **Card resolution cascade** — local DB -> Scryfall -> MTGJSON, used by catalog search, CSV import, and failed-row recovery. See [catalog-and-inventory.md](catalog-and-inventory.md#card-resolution-cascade).
-- **Batched async import** — the CSV worker claims rows with `SELECT … FOR UPDATE SKIP LOCKED`, processes 25 at a time, and self-dispatches the next batch. See [csv-import.md](csv-import.md).
+- **Multi-tenancy** - `TenantSubscriber` reads `{slug}` from `/api/stores/{slug}/*`, resolves the `Store`, and enables a Doctrine SQL filter that scopes `InventoryItem` and `Order` queries by `store_id`. `/api/admin/*` routes disable the filter so super-admins see everything.
+- **Create-on-write** - customer profile, favorites, and want-list reads never create rows. The `StoreCustomer` row is created lazily on the first write.
+- **Card resolution cascade** - local DB -> Scryfall -> MTGJSON, used by catalog search, CSV import, and failed-row recovery.
+- **Batched async import** - the CSV worker claims rows with `SELECT ... FOR UPDATE SKIP LOCKED`, processes 25 at a time, and self-dispatches the next batch.
+- **Persisted notifications** - customer notifications are stored in `customer_notifications`; Mailpit email is a delivery side effect. The frontend currently polls every 15 seconds.
+- **Provider-owned payments** - payment provider credentials belong to the store connection in `store_payment_accounts`; the API never returns provider tokens.
+
+## Local development dependencies
+
+- PostgreSQL stores application data and the Messenger queue table.
+- Mailpit receives local fulfillment emails on SMTP port `1025`; its UI runs on `http://localhost:8025`.
+- Square OAuth is optional locally. When Square env vars are missing, the payments UI reports that Square is not configured, and local test orders still work because they bypass payment capture.

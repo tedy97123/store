@@ -21,8 +21,25 @@ class OrderRepository extends ServiceEntityRepository
     public function findByStore(Store $store): array
     {
         return $this->createQueryBuilder('o')
+            ->leftJoin('o.lines', 'line')
+            ->addSelect('line')
             ->andWhere('o.store = :store')
             ->setParameter('store', $store)
+            ->orderBy('o.createdAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /** @return list<Order> */
+    public function findByStoreAndCustomerEmail(Store $store, string $email): array
+    {
+        return $this->createQueryBuilder('o')
+            ->leftJoin('o.lines', 'line')
+            ->addSelect('line')
+            ->andWhere('o.store = :store')
+            ->andWhere('LOWER(o.customerEmail) = LOWER(:email)')
+            ->setParameter('store', $store)
+            ->setParameter('email', $email)
             ->orderBy('o.createdAt', 'DESC')
             ->getQuery()
             ->getResult();

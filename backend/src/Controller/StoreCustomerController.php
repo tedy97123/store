@@ -4,23 +4,29 @@ namespace App\Controller;
 
 use App\Entity\Card;
 use App\Entity\CartItem;
+use App\Entity\CustomerNotification;
 use App\Entity\CustomerFavorite;
 use App\Entity\CustomerWantListEntry;
 use App\Entity\InventoryItem;
+use App\Entity\Order;
+use App\Entity\OrderLine;
 use App\Entity\Store;
 use App\Entity\StoreCustomer;
 use App\Entity\User;
 use App\Repository\CardRepository;
 use App\Repository\CartItemRepository;
+use App\Repository\CustomerNotificationRepository;
 use App\Repository\CustomerFavoriteRepository;
 use App\Repository\CustomerWantListEntryRepository;
 use App\Repository\InventoryItemRepository;
+use App\Repository\OrderRepository;
 use App\Repository\StoreCustomerRepository;
 use App\Repository\StoreRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -31,12 +37,15 @@ final class StoreCustomerController extends AbstractController
     public function __construct(
         private readonly StoreRepository $storeRepository,
         private readonly StoreCustomerRepository $customerRepository,
+        private readonly CustomerNotificationRepository $notificationRepository,
         private readonly CustomerFavoriteRepository $favoriteRepository,
         private readonly CustomerWantListEntryRepository $wantListRepository,
         private readonly CartItemRepository $cartRepository,
         private readonly InventoryItemRepository $inventoryRepository,
         private readonly CardRepository $cardRepository,
+        private readonly OrderRepository $orderRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly KernelInterface $kernel,
     ) {
     }
 
@@ -336,6 +345,131 @@ final class StoreCustomerController extends AbstractController
         return $this->json(null, 204);
     }
 
+    #[Route('/orders', name: 'api_store_customer_orders', methods: ['GET'])]
+    public function orders(string $slug): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $user = $this->getUser();
+        if (!$user instanceof User || null === $user->getEmail()) {
+            throw $this->createAccessDeniedException();
+        }
+
+        return $this->json(array_map(
+            $this->serializeOrder(...),
+            $this->orderRepository->findByStoreAndCustomerEmail($store, $user->getEmail()),
+        ));
+    }
+
+    #[Route('/notifications', name: 'api_store_customer_notifications', methods: ['GET'])]
+    public function notifications(string $slug): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            throw $this->createAccessDeniedException();
+        }
+
+        return $this->json(array_map(
+            $this->serializeNotification(...),
+            $this->notificationRepository->findForUserAndStore($user, $store),
+        ));
+    }
+
+    #[Route('/notifications/{id}/read', name: 'api_store_customer_notification_read', methods: ['PATCH'])]
+    public function markNotificationRead(string $slug, int $id): JsonResponse
+    {
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            throw $this->createAccessDeniedException();
+        }
+
+        $notification = $this->notificationRepository->find($id);
+        if (!$notification instanceof CustomerNotification || $notification->getUser()?->getId() !== $user->getId() || $notification->getStore()?->getId() !== $store->getId()) {
+            return $this->json(['detail' => 'Notification not found.'], 404);
+        }
+
+        $notification->markRead();
+        $this->entityManager->flush();
+
+        return $this->json($this->serializeNotification($notification));
+    }
+
+    #[Route('/test-order', name: 'api_store_customer_test_order', methods: ['POST'])]
+    public function createTestOrder(string $slug): JsonResponse
+    {
+        if (!in_array($this->kernel->getEnvironment(), ['dev', 'test'], true)) {
+            return $this->json(['detail' => 'Test orders are only available locally.'], 404);
+        }
+
+        $store = $this->resolveStore($slug);
+        if (!$store instanceof Store) {
+            return $this->json(['detail' => 'Store not found.'], 404);
+        }
+
+        $customer = $this->findCustomer($store);
+        if (!$customer instanceof StoreCustomer) {
+            return $this->json(['detail' => 'Your cart is empty.'], 422);
+        }
+
+        $cartItems = $this->cartRepository->findForCustomer($customer);
+        if ([] === $cartItems) {
+            return $this->json(['detail' => 'Your cart is empty.'], 422);
+        }
+
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            throw $this->createAccessDeniedException();
+        }
+
+        $order = (new Order())
+            ->setStore($store)
+            ->setReference($this->generateOrderReference())
+            ->setCustomerName($user->getDisplayName())
+            ->setCustomerEmail($user->getEmail());
+
+        $total = 0;
+        foreach ($cartItems as $cartItem) {
+            $inventoryItem = $cartItem->getInventoryItem();
+            if (!$inventoryItem instanceof InventoryItem || $inventoryItem->getQuantity() < 1) {
+                return $this->json(['detail' => 'One or more cart items are no longer in stock.'], 422);
+            }
+
+            $quantity = min($cartItem->getQuantity(), $inventoryItem->getQuantity());
+            $line = (new OrderLine())
+                ->setCard($inventoryItem->getCard())
+                ->setCardName($inventoryItem->getCard()?->getName() ?? 'Unknown card')
+                ->setQuantity($quantity)
+                ->setPriceCents($inventoryItem->getPriceCents());
+
+            $order->addLine($line);
+            $total += $quantity * $inventoryItem->getPriceCents();
+        }
+
+        $order->setTotalCents($total);
+        $this->entityManager->persist($order);
+
+        foreach ($cartItems as $cartItem) {
+            $this->entityManager->remove($cartItem);
+        }
+
+        $this->entityManager->flush();
+
+        return $this->json($this->serializeOrder($order), 201);
+    }
+
     private function resolveStore(string $slug): ?Store
     {
         if (!$this->getUser() instanceof User) {
@@ -453,6 +587,11 @@ final class StoreCustomerController extends AbstractController
         return null === $maxLength ? $string : mb_substr($string, 0, $maxLength);
     }
 
+    private function generateOrderReference(): string
+    {
+        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
+    }
+
     /** @return array<string, mixed> */
     private function serializeCustomer(StoreCustomer $customer): array
     {
@@ -502,6 +641,52 @@ final class StoreCustomerController extends AbstractController
             'inventoryItem' => $this->serializeInventoryItem($entry->getInventoryItem()),
             'createdAt' => $entry->getCreatedAt()->format(DATE_ATOM),
             'updatedAt' => $entry->getUpdatedAt()->format(DATE_ATOM),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeOrder(Order $order): array
+    {
+        return [
+            'id' => $order->getId(),
+            'reference' => $order->getReference(),
+            'status' => $order->getStatus()->value,
+            'storeName' => $order->getStore()?->getName(),
+            'storeSlug' => $order->getStore()?->getSlug(),
+            'customerName' => $order->getCustomerName(),
+            'customerEmail' => $order->getCustomerEmail(),
+            'totalCents' => $order->getTotalCents(),
+            'createdAt' => $order->getCreatedAt()->format(DATE_ATOM),
+            'lines' => array_map($this->serializeOrderLine(...), $order->getLines()->toArray()),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeOrderLine(OrderLine $line): array
+    {
+        return [
+            'id' => $line->getId(),
+            'cardName' => $line->getCardName(),
+            'quantity' => $line->getQuantity(),
+            'priceCents' => $line->getPriceCents(),
+            'imageUris' => $line->getCard()?->getImageUris(),
+            'setCode' => $line->getCard()?->getSetCode(),
+            'collectorNumber' => $line->getCard()?->getCollectorNumber(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeNotification(CustomerNotification $notification): array
+    {
+        return [
+            'id' => $notification->getId(),
+            'type' => $notification->getType(),
+            'title' => $notification->getTitle(),
+            'body' => $notification->getBody(),
+            'orderId' => $notification->getRelatedOrder()?->getId(),
+            'orderReference' => $notification->getRelatedOrder()?->getReference(),
+            'createdAt' => $notification->getCreatedAt()->format(DATE_ATOM),
+            'readAt' => $notification->getReadAt()?->format(DATE_ATOM),
         ];
     }
 

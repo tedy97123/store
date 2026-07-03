@@ -6,12 +6,14 @@ use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\Link;
+use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Post;
 use App\Enum\OrderStatus;
 use App\Repository\OrderRepository;
 use App\State\StoreOrderCollectionProvider;
 use App\State\StoreOrderItemProvider;
 use App\State\StoreOrderProcessor;
+use App\State\StoreOrderStatusProcessor;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
@@ -41,6 +43,18 @@ use Symfony\Component\Validator\Constraints as Assert;
             normalizationContext: ['groups' => ['order:read']],
             security: "is_granted('STORE_MANAGE', object.getStore())",
             provider: StoreOrderItemProvider::class,
+        ),
+        new Patch(
+            uriTemplate: '/stores/{slug}/orders/{id}',
+            uriVariables: [
+                'slug' => new Link(fromProperty: 'store', fromClass: Store::class, identifiers: ['slug']),
+                'id' => new Link(fromClass: Order::class),
+            ],
+            normalizationContext: ['groups' => ['order:read']],
+            denormalizationContext: ['groups' => ['order:write']],
+            security: "is_granted('STORE_MANAGE', object.getStore())",
+            provider: StoreOrderItemProvider::class,
+            processor: StoreOrderStatusProcessor::class,
         ),
         new Post(
             uriTemplate: '/stores/{slug}/orders',
