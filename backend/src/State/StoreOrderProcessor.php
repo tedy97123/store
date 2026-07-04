@@ -42,7 +42,7 @@ final readonly class StoreOrderProcessor implements ProcessorInterface
         }
 
         $data->setStore($store);
-        $data->setReference($this->generateReference());
+        $data->setReference(Order::generateReference());
 
         $total = 0;
         foreach ($inputLines as $i => $lineData) {
@@ -93,10 +93,5 @@ final readonly class StoreOrderProcessor implements ProcessorInterface
         $this->entityManager->flush();
 
         return $data;
-    }
-
-    private function generateReference(): string
-    {
-        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
     }
 }

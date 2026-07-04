@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -40,13 +40,19 @@ import { CustomerOrderCard } from '../components/orders/CustomerOrderCard'
 import { NotificationList } from '../components/notifications/NotificationList'
 
 type TabId = 'profile' | 'orders' | 'favorites' | 'wantlist'
+const TAB_IDS: TabId[] = ['profile', 'orders', 'favorites', 'wantlist']
 
 export default function CustomerProfilePage() {
   const { slug = '' } = useParams()
   const { user } = useAuth()
   const storeQuery = useStore(slug)
   useStoreTheme(storeQuery.data)
-  const [tab, setTab] = useState<TabId>('profile')
+  // The tab lives in the URL (?tab=orders) so other pages — e.g. the cart's
+  // "view your order" link — can deep-link straight to a section.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab') as TabId | null
+  const tab: TabId = tabParam && TAB_IDS.includes(tabParam) ? tabParam : 'profile'
+  const setTab = (next: TabId) => setSearchParams(next === 'profile' ? {} : { tab: next }, { replace: true })
 
   const favoritesQuery = useCustomerFavorites(slug)
   const wantListQuery = useCustomerWantList(slug)

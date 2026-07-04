@@ -39,6 +39,22 @@ class UserRepository extends ServiceEntityRepository implements UserProviderInte
         return User::class === $class || is_subclass_of($class, User::class);
     }
 
+    /**
+     * Case-insensitive email lookup. Order.customerEmail is free text (an
+     * admin may type "John@Example.com"), so matching it back to an account
+     * must ignore case — the same rule OrderRepository uses for the customer
+     * order list.
+     */
+    public function findOneByEmailInsensitive(string $email): ?User
+    {
+        return $this->createQueryBuilder('u')
+            ->andWhere('LOWER(u.email) = LOWER(:email)')
+            ->setParameter('email', $email)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     public function save(User $user, bool $flush = false): void
     {
         $this->getEntityManager()->persist($user);

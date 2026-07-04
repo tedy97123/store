@@ -86,7 +86,7 @@ class Order
     private string $reference = '';
 
     #[ORM\Column(enumType: OrderStatus::class)]
-    #[Groups(['order:read', 'order:write'])]
+    #[Groups(['order:read', 'order:write', 'order:status'])]
     private OrderStatus $status = OrderStatus::PENDING;
 
     #[ORM\Column(length: 255, nullable: true)]
@@ -124,6 +124,12 @@ class Order
     {
         $this->createdAt = new \DateTimeImmutable();
         $this->lines = new ArrayCollection();
+    }
+
+    /** Single source of truth for the human-facing order reference format. */
+    public static function generateReference(): string
+    {
+        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
     }
 
     public function getId(): ?int

@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\Order;
 use App\Entity\Store;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\QueryBuilder;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
