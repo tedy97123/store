@@ -133,17 +133,6 @@ class OrderLine
         return $this->card?->getImageUris();
     }
 
-    /**
-     * Server-computed best image URL. Unlike raw imageUris this covers
-     * double-faced cards (whose art lives on the faces), so order rows always
-     * have something to render.
-     */
-    #[Groups(['order:read'])]
-    public function getImageUrl(): ?string
-    {
-        return $this->card?->getImageUrl();
-    }
-
     #[Groups(['order:read'])]
     public function getSetCode(): ?string
     {

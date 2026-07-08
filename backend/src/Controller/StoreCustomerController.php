@@ -436,7 +436,7 @@ final class StoreCustomerController extends AbstractController
 
         $order = (new Order())
             ->setStore($store)
-            ->setReference(Order::generateReference())
+            ->setReference($this->generateOrderReference())
             ->setCustomerName($user->getDisplayName())
             ->setCustomerEmail($user->getEmail());
 
@@ -447,31 +447,15 @@ final class StoreCustomerController extends AbstractController
                 return $this->json(['detail' => 'One or more cart items are no longer in stock.'], 422);
             }
 
-            $cardName = $inventoryItem->getCard()?->getName() ?? 'Unknown card';
-            if ($cartItem->getQuantity() > $inventoryItem->getQuantity()) {
-                // Never silently sell fewer copies than the cart shows — tell
-                // the customer so they can adjust the line instead.
-                return $this->json(['detail' => sprintf(
-                    'Only %d of "%s" left in stock — please update your cart.',
-                    $inventoryItem->getQuantity(),
-                    $cardName,
-                )], 422);
-            }
-
-            $quantity = $cartItem->getQuantity();
+            $quantity = min($cartItem->getQuantity(), $inventoryItem->getQuantity());
             $line = (new OrderLine())
                 ->setCard($inventoryItem->getCard())
-                ->setInventoryItem($inventoryItem)
-                ->setCardName($cardName)
+                ->setCardName($inventoryItem->getCard()?->getName() ?? 'Unknown card')
                 ->setQuantity($quantity)
                 ->setPriceCents($inventoryItem->getPriceCents());
 
             $order->addLine($line);
             $total += $quantity * $inventoryItem->getPriceCents();
-
-            // Take the copies out of stock so the storefront can't oversell;
-            // cancelling/refunding the order puts them back.
-            $inventoryItem->setQuantity($inventoryItem->getQuantity() - $quantity);
         }
 
         $order->setTotalCents($total);
@@ -603,6 +587,11 @@ final class StoreCustomerController extends AbstractController
         return null === $maxLength ? $string : mb_substr($string, 0, $maxLength);
     }
 
+    private function generateOrderReference(): string
+    {
+        return 'ORD-'.strtoupper(bin2hex(random_bytes(4)));
+    }
+
     /** @return array<string, mixed> */
     private function serializeCustomer(StoreCustomer $customer): array
     {
@@ -680,8 +669,6 @@ final class StoreCustomerController extends AbstractController
             'cardName' => $line->getCardName(),
             'quantity' => $line->getQuantity(),
             'priceCents' => $line->getPriceCents(),
-            // imageUrl covers double-faced cards (no top-level imageUris).
-            'imageUrl' => $line->getCard()?->getImageUrl(),
             'imageUris' => $line->getCard()?->getImageUris(),
             'setCode' => $line->getCard()?->getSetCode(),
             'collectorNumber' => $line->getCard()?->getCollectorNumber(),

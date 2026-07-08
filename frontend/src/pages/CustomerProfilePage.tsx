@@ -15,7 +15,6 @@ import {
   useCustomerProfile,
   useCustomerWantList,
   useDebouncedValue,
-  useMarkNotificationRead,
   useStore,
   useStoreTheme,
 } from '../hooks'
@@ -41,7 +40,6 @@ import { CustomerOrderCard } from '../components/orders/CustomerOrderCard'
 import { NotificationList } from '../components/notifications/NotificationList'
 
 type TabId = 'profile' | 'orders' | 'favorites' | 'wantlist'
-
 const TAB_IDS: TabId[] = ['profile', 'orders', 'favorites', 'wantlist']
 
 export default function CustomerProfilePage() {
@@ -126,8 +124,15 @@ function NotificationsPanel({
   slug: string
   query: ReturnType<typeof useCustomerNotifications>
 }) {
+  const queryClient = useQueryClient()
   const notifications = (query.data ?? []).filter((notification) => !notification.readAt)
-  const markRead = useMarkNotificationRead(slug)
+
+  const markRead = useMutation({
+    mutationFn: async (id: number) => {
+      await api.patch(`/stores/${slug}/customer/notifications/${id}/read`)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.notifications(slug) }),
+  })
 
   if (query.isLoading || notifications.length === 0) return null
 
@@ -140,7 +145,7 @@ function NotificationsPanel({
         </div>
         <NotificationList
           notifications={notifications}
-          pendingId={markRead.isPending ? markRead.variables : undefined}
+          pendingId={markRead.variables}
           onMarkRead={(id) => markRead.mutate(id)}
         />
       </CardBody>

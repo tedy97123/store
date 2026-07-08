@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import { Bell } from 'lucide-react'
-import { useCustomerNotifications, useMarkNotificationRead } from '../../hooks'
+import api from '../../api/client'
+import { customerKeys, useCustomerNotifications } from '../../hooks'
 import { NotificationList } from './NotificationList'
 
 export function NotificationBell({ slug }: { slug: string }) {
+  const queryClient = useQueryClient()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -13,7 +16,12 @@ export function NotificationBell({ slug }: { slug: string }) {
   const unread = notifications.filter((notification) => !notification.readAt)
   const badge = unread.length > 99 ? '99+' : String(unread.length)
 
-  const markRead = useMarkNotificationRead(slug)
+  const markRead = useMutation({
+    mutationFn: async (id: number) => {
+      await api.patch(`/stores/${slug}/customer/notifications/${id}/read`)
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.notifications(slug) }),
+  })
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -60,7 +68,7 @@ export function NotificationBell({ slug }: { slug: string }) {
           </div>
           <NotificationList
             notifications={unread.slice(0, 6)}
-            pendingId={markRead.isPending ? markRead.variables : undefined}
+            pendingId={markRead.variables}
             onMarkRead={(id) => markRead.mutate(id)}
             compact
           />

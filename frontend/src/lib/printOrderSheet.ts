@@ -1,7 +1,7 @@
 import { formatPrice } from '../api/client'
 import type { Order } from '../api/types'
 import { formatDateTime } from './format'
-import { orderItemCount, orderStatusLabel } from './orders'
+import { ORDER_STATUS_LABELS, orderItemCount } from './orders'
 
 function escapeHtml(value: string): string {
   return value
@@ -76,7 +76,7 @@ function orderSheetHtml(order: Order): string {
           </div>
           <div class="box">
             <div class="label">Status</div>
-            <div class="value">${escapeHtml(orderStatusLabel(order.status))}</div>
+            <div class="value">${escapeHtml(ORDER_STATUS_LABELS[order.status])}</div>
             <div class="muted">${itemCount} ${itemCount === 1 ? 'item' : 'items'}</div>
           </div>
         </section>

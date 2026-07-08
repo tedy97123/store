@@ -3,7 +3,6 @@ import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useOrders, useStore, useStoreTheme } from '../../hooks'
-import { isOpenOrder } from '../../lib/orders'
 import { Avatar, Button, buttonVariants } from '../ui'
 import {
   Boxes,
@@ -66,7 +65,9 @@ export default function AdminLayout() {
   const { data: store } = useStore(params.slug)
   useStoreTheme(store)
   const { data: orders = [] } = useOrders(params.slug ?? '')
-  const activeOrderCount = orders.filter(isOpenOrder).length
+  const activeOrderCount = orders.filter((order) =>
+    order.status === 'pending' || order.status === 'received' || order.status === 'paid' || order.status === 'shipped',
+  ).length
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>

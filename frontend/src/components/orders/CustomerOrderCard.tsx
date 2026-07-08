@@ -2,8 +2,7 @@ import { ChevronDown, Store } from 'lucide-react'
 import { formatPrice } from '../../api/client'
 import type { Order, OrderLine } from '../../api/types'
 import { cx } from '../../lib/cx'
-import { formatDate } from '../../lib/format'
-import { orderItemCount, orderLineImage } from '../../lib/orders'
+import { formatOrderShortDate, orderItemCount } from '../../lib/orders'
 import { OrderLineList } from './OrderLineList'
 import { OrderStatusBadge } from './OrderStatusBadge'
 import { OrderWorkflow } from './OrderWorkflow'
@@ -38,7 +37,7 @@ export function CustomerOrderCard({
             <OrderStatusBadge status={order.status} />
           </div>
           <p className="mt-2 text-sm text-fg-muted">
-            {itemCount} {itemCount === 1 ? 'item' : 'items'} · {formatDate(order.createdAt)}
+            {itemCount} {itemCount === 1 ? 'item' : 'items'} · {formatOrderShortDate(order.createdAt)}
           </p>
 
           {previewLines.length > 0 && (
@@ -70,7 +69,7 @@ export function CustomerOrderCard({
 }
 
 function CardThumb({ line }: { line: OrderLine }) {
-  const image = orderLineImage(line)
+  const image = line.imageUris?.small ?? line.imageUris?.normal ?? line.imageUrl ?? undefined
   return (
     <span className="grid h-14 w-10 place-items-center overflow-hidden rounded-btn border border-border bg-bg ring-2 ring-surface">
       {image ? <img src={image} alt="" className="size-full object-cover" /> : <span className="text-xs font-bold text-fg-muted">?</span>}

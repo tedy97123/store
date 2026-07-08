@@ -51,9 +51,7 @@ use Symfony\Component\Validator\Constraints as Assert;
                 'id' => new Link(fromClass: Order::class),
             ],
             normalizationContext: ['groups' => ['order:read']],
-            // Status only: the PATCH endpoint exists to move an order through
-            // its workflow, not to rewrite customer details on a placed order.
-            denormalizationContext: ['groups' => ['order:status']],
+            denormalizationContext: ['groups' => ['order:write']],
             security: "is_granted('STORE_MANAGE', object.getStore())",
             provider: StoreOrderItemProvider::class,
             processor: StoreOrderStatusProcessor::class,

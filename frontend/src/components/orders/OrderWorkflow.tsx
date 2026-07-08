@@ -1,7 +1,7 @@
 import { CheckCircle2 } from 'lucide-react'
 import type { OrderStatus } from '../../api/types'
 import { cx } from '../../lib/cx'
-import { ORDER_WORKFLOW, normalizeWorkflowStatus, orderStatusLabel } from '../../lib/orders'
+import { ORDER_STATUS_LABELS, ORDER_WORKFLOW, normalizeWorkflowStatus } from '../../lib/orders'
 
 export function OrderWorkflow({ status }: { status: OrderStatus }) {
   const normalized = normalizeWorkflowStatus(status)
@@ -24,7 +24,7 @@ export function OrderWorkflow({ status }: { status: OrderStatus }) {
                 )}
               />
               <p className={cx('mt-1 truncate text-[0.68rem] font-bold', complete ? 'text-fg' : 'text-fg-muted')}>
-                {orderStatusLabel(step)}
+                {ORDER_STATUS_LABELS[step]}
               </p>
             </div>
           )
@@ -33,7 +33,7 @@ export function OrderWorkflow({ status }: { status: OrderStatus }) {
       {isStopped && (
         <p className="inline-flex items-center gap-1 text-xs font-bold text-fg-muted">
           <CheckCircle2 aria-hidden className="size-3.5" />
-          {orderStatusLabel(status)}
+          {ORDER_STATUS_LABELS[status]}
         </p>
       )}
     </div>
