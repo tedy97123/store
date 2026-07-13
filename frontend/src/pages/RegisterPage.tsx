@@ -4,6 +4,7 @@ import { Info, UserPlus } from 'lucide-react'
 import { useStore } from '../hooks'
 import { Button, Input } from '../components/ui'
 import AuthMarketingAside from '../components/AuthMarketingAside'
+import { SsoOption, useSsoStatus } from '../components/SsoOption'
 import { useAuth } from '../context/AuthContext'
 
 interface RegisterPageProps {
@@ -54,6 +55,7 @@ export default function RegisterPage({ accountType }: RegisterPageProps) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const sso = useSsoStatus()
 
   const fallback = storeSlug ? `/s/${storeSlug}` : '/'
   const from = (location.state as { from?: string } | null)?.from ?? fallback
@@ -113,7 +115,9 @@ export default function RegisterPage({ accountType }: RegisterPageProps) {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+          <SsoOption sso={sso} next={from} />
+
+          <form onSubmit={handleSubmit} className={sso?.configured ? 'mt-4 space-y-4' : 'mt-8 space-y-4'}>
             <Input
               label="Display name"
               autoComplete="name"

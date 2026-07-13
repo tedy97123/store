@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Controller;
+
+use App\Service\Auth\OidcClient;
+use App\Service\Onboarding\AddressAutocompleteClient;
+use App\Service\Onboarding\PaymentGatewayClient;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
+
+/**
+ * A read-only snapshot of which optional integrations are wired up, so the
+ * platform admin can see at a glance what's configured. The actual credentials
+ * live in backend/.env.local (see the SSO/payments/geocode env keys).
+ */
+#[Route('/api/admin')]
+#[IsGranted('ROLE_SUPER_ADMIN')]
+class AdminIntegrationsController extends AbstractController
+{
+    public function __construct(
+        private readonly OidcClient $oidc,
+        private readonly AddressAutocompleteClient $addressClient,
+        private readonly PaymentGatewayClient $paymentGateway,
+    ) {
+    }
+
+    #[Route('/integrations', name: 'api_admin_integrations', methods: ['GET'])]
+    public function index(): JsonResponse
+    {
+        return $this->json([
+            'sso' => [
+                'configured' => $this->oidc->isConfigured(),
+                'providerName' => $this->oidc->providerName(),
+                'envKeys' => ['SSO_OIDC_ISSUER', 'SSO_OIDC_CLIENT_ID', 'SSO_OIDC_CLIENT_SECRET'],
+            ],
+            'addressAutocomplete' => [
+                'configured' => $this->addressClient->isConfigured(),
+                'provider' => 'Mapbox',
+                'envKeys' => ['MAPBOX_ACCESS_TOKEN'],
+            ],
+            'subscriptionPayments' => [
+                'configured' => $this->paymentGateway->isLive(),
+                'mode' => $this->paymentGateway->isLive() ? 'braintree' : 'mock',
+                'provider' => 'Braintree',
+                'envKeys' => ['BRAINTREE_MERCHANT_ID', 'BRAINTREE_PUBLIC_KEY', 'BRAINTREE_PRIVATE_KEY'],
+            ],
+        ]);
+    }
+}

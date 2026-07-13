@@ -61,6 +61,24 @@ final readonly class StoreSettingsUpdater
             $store->setSpotlightMinPriceCents(max(0, (int) $payload['spotlightMinPriceCents']));
         }
 
+        $this->applyBranding($store, $payload);
+
+        $this->entityManager->flush();
+
+        return $store;
+    }
+
+    /**
+     * Validate and apply branding fields (colors, image URLs, hero/tagline
+     * copy, card display style) without persisting. Shared by the settings
+     * PATCH endpoint and store onboarding so both validate identically.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws \InvalidArgumentException when a value fails validation
+     */
+    public function applyBranding(Store $store, array $payload): void
+    {
         if (array_key_exists('cardDisplayStyle', $payload)) {
             $style = $this->stringValue($payload['cardDisplayStyle']);
             if (!in_array($style, self::CARD_DISPLAY_STYLES, true)) {
@@ -104,10 +122,6 @@ final readonly class StoreSettingsUpdater
             $value = $this->stringValue($payload[$key]);
             $store->$setter('' === $value ? null : mb_substr($value, 0, $max));
         }
-
-        $this->entityManager->flush();
-
-        return $store;
     }
 
     /** @return array<string, mixed> */

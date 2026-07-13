@@ -159,6 +159,88 @@ class Store
     #[Groups(['store:read', 'store:admin'])]
     private string $cardDisplayStyle = 'gallery';
 
+    // --- Enterprise onboarding: application status ---
+
+    public const STATUS_PENDING = 'pending';
+    public const STATUS_APPROVED = 'approved';
+    public const STATUS_REJECTED = 'rejected';
+
+    /**
+     * Application lifecycle for self-serve store signups: `pending` until a
+     * platform admin approves (which also flips isActive on). Admin-provisioned
+     * stores default to `approved`.
+     */
+    #[ORM\Column(length: 16, options: ['default' => self::STATUS_APPROVED])]
+    #[Assert\Choice(choices: [self::STATUS_PENDING, self::STATUS_APPROVED, self::STATUS_REJECTED])]
+    #[Groups(['store:read', 'store:admin'])]
+    private string $status = self::STATUS_APPROVED;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $rejectionReason = null;
+
+    // --- Business address (collected during onboarding) ---
+
+    #[ORM\Column(length: 255, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $addressLine1 = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $addressLine2 = null;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $city = null;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $region = null;
+
+    #[ORM\Column(length: 32, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $postalCode = null;
+
+    #[ORM\Column(length: 2, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $country = null;
+
+    #[ORM\Column(length: 32, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $phone = null;
+
+    #[ORM\Column(type: 'float', nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?float $latitude = null;
+
+    #[ORM\Column(type: 'float', nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?float $longitude = null;
+
+    // --- Subscription plan / tier (selected during onboarding) ---
+
+    #[ORM\Column(length: 32, nullable: true)]
+    #[Groups(['store:read', 'store:admin'])]
+    private ?string $planKey = null;
+
+    #[ORM\Column(length: 32, options: ['default' => 'inactive'])]
+    #[Groups(['store:admin'])]
+    private string $subscriptionStatus = 'inactive';
+
+    /** paypal | apple_pay | google_pay | card */
+    #[ORM\Column(length: 32, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $paymentMethodType = null;
+
+    /** Opaque reference from the payment processor (nonce / transaction id). */
+    #[ORM\Column(length: 255, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $paymentReference = null;
+
+    #[ORM\Column(length: 8, nullable: true)]
+    #[Groups(['store:admin'])]
+    private ?string $paymentLast4 = null;
+
     #[ORM\Column]
     #[Groups(['store:read', 'store:admin'])]
     private \DateTimeImmutable $createdAt;
@@ -402,6 +484,198 @@ class Store
     public function setCardDisplayStyle(string $cardDisplayStyle): static
     {
         $this->cardDisplayStyle = $cardDisplayStyle;
+
+        return $this;
+    }
+
+    public function getStatus(): string
+    {
+        return $this->status;
+    }
+
+    public function setStatus(string $status): static
+    {
+        $this->status = $status;
+
+        return $this;
+    }
+
+    public function getRejectionReason(): ?string
+    {
+        return $this->rejectionReason;
+    }
+
+    public function setRejectionReason(?string $rejectionReason): static
+    {
+        $this->rejectionReason = $rejectionReason;
+
+        return $this;
+    }
+
+    public function getAddressLine1(): ?string
+    {
+        return $this->addressLine1;
+    }
+
+    public function setAddressLine1(?string $addressLine1): static
+    {
+        $this->addressLine1 = $addressLine1;
+
+        return $this;
+    }
+
+    public function getAddressLine2(): ?string
+    {
+        return $this->addressLine2;
+    }
+
+    public function setAddressLine2(?string $addressLine2): static
+    {
+        $this->addressLine2 = $addressLine2;
+
+        return $this;
+    }
+
+    public function getCity(): ?string
+    {
+        return $this->city;
+    }
+
+    public function setCity(?string $city): static
+    {
+        $this->city = $city;
+
+        return $this;
+    }
+
+    public function getRegion(): ?string
+    {
+        return $this->region;
+    }
+
+    public function setRegion(?string $region): static
+    {
+        $this->region = $region;
+
+        return $this;
+    }
+
+    public function getPostalCode(): ?string
+    {
+        return $this->postalCode;
+    }
+
+    public function setPostalCode(?string $postalCode): static
+    {
+        $this->postalCode = $postalCode;
+
+        return $this;
+    }
+
+    public function getCountry(): ?string
+    {
+        return $this->country;
+    }
+
+    public function setCountry(?string $country): static
+    {
+        $this->country = $country;
+
+        return $this;
+    }
+
+    public function getPhone(): ?string
+    {
+        return $this->phone;
+    }
+
+    public function setPhone(?string $phone): static
+    {
+        $this->phone = $phone;
+
+        return $this;
+    }
+
+    public function getLatitude(): ?float
+    {
+        return $this->latitude;
+    }
+
+    public function setLatitude(?float $latitude): static
+    {
+        $this->latitude = $latitude;
+
+        return $this;
+    }
+
+    public function getLongitude(): ?float
+    {
+        return $this->longitude;
+    }
+
+    public function setLongitude(?float $longitude): static
+    {
+        $this->longitude = $longitude;
+
+        return $this;
+    }
+
+    public function getPlanKey(): ?string
+    {
+        return $this->planKey;
+    }
+
+    public function setPlanKey(?string $planKey): static
+    {
+        $this->planKey = $planKey;
+
+        return $this;
+    }
+
+    public function getSubscriptionStatus(): string
+    {
+        return $this->subscriptionStatus;
+    }
+
+    public function setSubscriptionStatus(string $subscriptionStatus): static
+    {
+        $this->subscriptionStatus = $subscriptionStatus;
+
+        return $this;
+    }
+
+    public function getPaymentMethodType(): ?string
+    {
+        return $this->paymentMethodType;
+    }
+
+    public function setPaymentMethodType(?string $paymentMethodType): static
+    {
+        $this->paymentMethodType = $paymentMethodType;
+
+        return $this;
+    }
+
+    public function getPaymentReference(): ?string
+    {
+        return $this->paymentReference;
+    }
+
+    public function setPaymentReference(?string $paymentReference): static
+    {
+        $this->paymentReference = $paymentReference;
+
+        return $this;
+    }
+
+    public function getPaymentLast4(): ?string
+    {
+        return $this->paymentLast4;
+    }
+
+    public function setPaymentLast4(?string $paymentLast4): static
+    {
+        $this->paymentLast4 = $paymentLast4;
 
         return $this;
     }

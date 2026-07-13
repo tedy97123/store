@@ -28,6 +28,22 @@ export interface Store {
   heroSubheading?: string | null
   tagline?: string | null
   cardDisplayStyle?: CardDisplayStyle
+  // Enterprise onboarding (status/planKey in store:read; rest in store:admin)
+  status?: 'pending' | 'approved' | 'rejected'
+  rejectionReason?: string | null
+  planKey?: string | null
+  subscriptionStatus?: string
+  paymentMethodType?: string | null
+  paymentLast4?: string | null
+  addressLine1?: string | null
+  addressLine2?: string | null
+  city?: string | null
+  region?: string | null
+  postalCode?: string | null
+  country?: string | null
+  phone?: string | null
+  latitude?: number | null
+  longitude?: number | null
   owner?: {
     id: number
     email: string
@@ -57,6 +73,53 @@ export interface SquareConnectResponse {
   authorizationUrl: string
   environment: 'sandbox' | 'production' | string
   scopes: string[]
+}
+
+export interface SsoStatus {
+  configured: boolean
+  providerName: string
+}
+
+export interface IntegrationStatus {
+  configured: boolean
+  provider?: string
+  mode?: string
+  envKeys: string[]
+}
+
+export interface AdminIntegrations {
+  sso: IntegrationStatus & { providerName: string }
+  addressAutocomplete: IntegrationStatus
+  subscriptionPayments: IntegrationStatus
+}
+
+export interface Plan {
+  key: string
+  name: string
+  priceCents: number
+  tagline: string
+  popular?: boolean
+  features: string[]
+}
+
+export interface GeocodeSuggestion {
+  label: string
+  addressLine1: string
+  city: string
+  region: string
+  postalCode: string
+  country: string
+  latitude: number | null
+  longitude: number | null
+}
+
+export type OnboardingPaymentMethod = 'paypal' | 'apple_pay' | 'google_pay' | 'card'
+
+export interface PaymentClientToken {
+  clientToken: string
+  mode: 'braintree' | 'mock'
+  environment: string
+  methods: OnboardingPaymentMethod[]
 }
 
 export interface CardFace {

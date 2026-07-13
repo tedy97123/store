@@ -3,3 +3,6 @@ export type { StoreHeroProps } from './StoreHero'
 
 export { StoreCard, StoreCardSkeleton } from './StoreCard'
 export type { StoreCardProps } from './StoreCard'
+
+export { StorePreview } from './StorePreview'
+export type { StorePreviewBranding } from './StorePreview'

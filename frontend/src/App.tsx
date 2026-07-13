@@ -8,6 +8,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import OwnerOnboardingWizard from './pages/OwnerOnboardingWizard'
+import SsoCallbackPage from './pages/SsoCallbackPage'
 import StorePage from './pages/StorePage'
 import MassSearchPage from './pages/MassSearchPage'
 import CartPage from './pages/CartPage'
@@ -30,8 +32,9 @@ export default function App() {
             <Route element={<AuthLayout />}>
               <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<Navigate to="/register/customer" replace />} />
-              <Route path="register/owner" element={<RegisterPage accountType="owner" />} />
+              <Route path="register/owner" element={<OwnerOnboardingWizard />} />
               <Route path="register/customer" element={<RegisterPage accountType="customer" />} />
+              <Route path="auth/sso/callback" element={<SsoCallbackPage />} />
             </Route>
 
             <Route element={<AppLayout />}>

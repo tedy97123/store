@@ -16,6 +16,7 @@ interface AuthContextValue {
   token: string | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
+  loginWithToken: (token: string) => Promise<void>
   register: (
     email: string,
     password: string,
@@ -65,6 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser()
   }, [refreshUser])
 
+  // Adopt a token minted elsewhere (e.g. the SSO callback redirect).
+  const loginWithToken = useCallback(async (nextToken: string) => {
+    localStorage.setItem('token', nextToken)
+    setToken(nextToken)
+    await refreshUser()
+  }, [refreshUser])
+
   const register = useCallback(async (
     email: string,
     password: string,
@@ -87,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       loading,
       login,
+      loginWithToken,
       register,
       logout,
       refreshUser,
@@ -95,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (user?.roles.includes('ROLE_STORE_OWNER') ?? false) ||
         (user?.ownedStores?.length ?? 0) > 0,
     }),
-    [user, token, loading, login, register, logout, refreshUser],
+    [user, token, loading, login, loginWithToken, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

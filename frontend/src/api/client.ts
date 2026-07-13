@@ -42,11 +42,11 @@ export function httpStatus(error: unknown): number | undefined {
 
 /**
  * Best-effort human-readable message for a failed request: prefer the API's
- * `detail` field, then the error's own message, then the caller's fallback.
+ * `detail`/`error` fields, then the error's own message, then the fallback.
  */
 export function extractErrorMessage(error: unknown, fallback: string): string {
-  const e = error as { response?: { data?: { detail?: string } }; message?: string } | null
-  return e?.response?.data?.detail ?? e?.message ?? fallback
+  const e = error as { response?: { data?: { detail?: string; error?: string } }; message?: string } | null
+  return e?.response?.data?.detail ?? e?.response?.data?.error ?? e?.message ?? fallback
 }
 
 export default api

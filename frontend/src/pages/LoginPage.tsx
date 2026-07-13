@@ -4,6 +4,7 @@ import { LogIn } from 'lucide-react'
 import { useStore } from '../hooks'
 import { Button, Input } from '../components/ui'
 import AuthMarketingAside from '../components/AuthMarketingAside'
+import { SsoOption, useSsoStatus } from '../components/SsoOption'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
@@ -17,6 +18,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const ssoParam = searchParams.get('sso')
+  const sso = useSsoStatus()
 
   const from = (location.state as { from?: string } | null)?.from ?? (storeSlug ? `/s/${storeSlug}` : '/')
 
@@ -63,7 +67,20 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+          {ssoParam === 'failed' && (
+            <p role="alert" className="mt-6 rounded-btn bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">
+              Single sign-on failed. Please try again or use your email and password.
+            </p>
+          )}
+          {ssoParam === 'unconfigured' && (
+            <p role="alert" className="mt-6 rounded-btn bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">
+              Single sign-on is not set up on this server. Use your email and password instead.
+            </p>
+          )}
+
+          <SsoOption sso={sso} next={from} />
+
+          <form onSubmit={handleSubmit} className={sso?.configured ? 'mt-4 space-y-4' : 'mt-8 space-y-4'}>
             <Input
               label="Email"
               type="email"
