@@ -229,7 +229,9 @@ See [auth-and-tenancy.md](auth-and-tenancy.md#multi-tenancy-filter) for request-
 - `customer_favorites` is unique on `(customer_id, inventory_item_id)`.
 - `store_payment_accounts` is unique on `(store_id, provider)`.
 - `customer_notifications` indexes user/store/order lookups for the notification bell and order fulfillment dedupe.
-- `cards` is indexed on `name` and `oracle_id` for search and card-resolution flows.
+- `cards` is indexed on `name` and `oracle_id`, plus two scaling indexes (migration `Version20260718090000`):
+  - `idx_card_set_collector` on `(LOWER(set_code), LOWER(collector_number))` — the **natural key of a printing**. Import resolution matches on this (indexed, exact) instead of scanning by name substring, so lookups stay fast as the catalog grows toward every MTG printing.
+  - `idx_card_name_trgm`, a `pg_trgm` GIN index on `LOWER(name)` — makes the catalog's leading-wildcard `LIKE '%…%'` searches index-backed instead of sequential scans.
 
 ## Security-sensitive storage
 

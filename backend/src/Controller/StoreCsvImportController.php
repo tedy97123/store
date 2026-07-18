@@ -666,7 +666,9 @@ final class StoreCsvImportController extends AbstractController
 
     private function collectionMatchKey(string $set, string $collectorNumber): string
     {
-        return strtolower(trim($set)).'|'.strtolower(trim($collectorNumber));
+        // Delegate to the canonical key builder so this can never drift from
+        // the format ScryfallClient::fetchCollectionBySetCollectors() keys by.
+        return \App\Service\Scryfall\ScryfallClient::collectionKey($set, $collectorNumber);
     }
 
     /** @return array<string, mixed> */

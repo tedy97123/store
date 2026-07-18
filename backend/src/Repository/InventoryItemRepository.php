@@ -17,8 +17,14 @@ class InventoryItemRepository extends ServiceEntityRepository
         parent::__construct($registry, InventoryItem::class);
     }
 
-    /** @return list<InventoryItem> */
-    public function findByStore(Store $store): array
+    /**
+     * One page of a store's inventory, card eagerly joined. Ordered by card
+     * name with the item id as a stable tiebreaker so LIMIT/OFFSET pages
+     * never overlap or skip rows when many printings share a name.
+     *
+     * @return list<InventoryItem>
+     */
+    public function findPageByStore(Store $store, int $offset, int $limit): array
     {
         return $this->createQueryBuilder('i')
             ->andWhere('i.store = :store')
@@ -26,8 +32,21 @@ class InventoryItemRepository extends ServiceEntityRepository
             ->join('i.card', 'c')
             ->addSelect('c')
             ->orderBy('c.name', 'ASC')
+            ->addOrderBy('i.id', 'ASC')
+            ->setFirstResult($offset)
+            ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
+    }
+
+    public function countByStore(Store $store): int
+    {
+        return (int) $this->createQueryBuilder('i')
+            ->select('COUNT(i.id)')
+            ->andWhere('i.store = :store')
+            ->setParameter('store', $store)
+            ->getQuery()
+            ->getSingleScalarResult();
     }
 
     public function findOneByStoreAndId(Store $store, int $id): ?InventoryItem

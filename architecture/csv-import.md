@@ -51,16 +51,24 @@ sequenceDiagram
         Bus->>W: ProcessCsvImportMessage(jobId)
         W->>DB: job.status = processing, startedAt
         W->>DB: claimNextQueued(job, 25): SELECT FOR UPDATE SKIP LOCKED, mark 25 processing
+        Note over W,SC: batch pre-resolution (preResolveRows)
+        W->>R: matchLocal() per row — indexed natural-key lookup
+        W->>SC: ONE fetchCollectionBySetCollectors() for local misses<br/>(75 identifiers per request)
         loop each of the 25 rows
-            W->>R: resolve(name, set, collector#, rarity, finish)
-            alt card resolved
+            alt pre-resolved (local or collection batch)
                 W->>IW: write(store, card, qty, cond, foil) [flush=false]
                 W->>DB: row.status = imported, importedItemId
-            else not found
-                W->>DB: row.status = error, error msg
+            else fallback: R.resolve() (search → MTGJSON)
+                alt card resolved
+                    W->>IW: write(store, card, qty, cond, foil) [flush=false]
+                    W->>DB: row.status = imported, importedItemId
+                else not found
+                    W->>DB: row.status = error, error msg
+                end
             end
         end
         W->>DB: flush batch (inventory_items + rows + job counters)
+        W->>DB: backfill importedItemId for newly created items
         alt more queued rows
             W->>Bus: dispatch next ProcessCsvImportMessage
         else
@@ -68,6 +76,8 @@ sequenceDiagram
         end
     end
 ```
+
+**Batch resolution economics**: once the catalog holds every printing (`default_cards` sync), a batch resolves entirely from the indexed local natural-key lookups — zero API calls. Cold-catalog imports cost at most `ceil(misses / 75)` collection requests per batch instead of one rate-limited search per row (a ~75× reduction). Rows the collection endpoint can't place fall back to the full per-row cascade so error messages stay specific.
 
 ---
 

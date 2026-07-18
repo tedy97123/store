@@ -230,10 +230,15 @@ Full API docs: **http://127.0.0.1:8000/api/docs**
 ## Scryfall sync
 
 ```bash
-php bin/console app:scryfall:sync
+php bin/console app:scryfall:sync                      # default_cards — every printing (recommended)
+php bin/console app:scryfall:sync --type=oracle_cards  # one printing per card name (smaller/faster)
 ```
 
-Downloads the Scryfall `oracle_cards` bulk file (~169 MB) and upserts the local catalog in batches. Also available to super-admins via `POST /api/admin/scryfall/sync`.
+Streams the chosen Scryfall bulk file to disk, parses it incrementally, and upserts the local catalog with multi-row `ON CONFLICT` batches — memory stays flat even for the multi-hundred-MB `default_cards` file.
+
+**`default_cards` is what makes the catalog self-sufficient**: store CSV imports identify a printing by set + collector number, and only the all-printings dataset can resolve those locally (indexed natural-key lookup) without falling back to the Scryfall API. Schedule it via cron to keep prices fresh.
+
+Super-admins can also trigger a sync via `POST /api/admin/scryfall/sync` (defaults to the smaller `oracle_cards` so the synchronous request stays within HTTP timeouts; accepts `{"type": "default_cards"}`).
 
 ---
 

@@ -25,7 +25,7 @@ final readonly class CatalogCardResolver
         string $rarity,
         string $finish,
     ): CatalogResolutionResult {
-        $localCard = $this->matchLocalCard($name, $setCode, $collectorNumber, $rarity, $finish);
+        $localCard = $this->matchLocal($name, $setCode, $collectorNumber, $rarity, $finish);
         if ($localCard instanceof Card) {
             return new CatalogResolutionResult($localCard);
         }
@@ -56,7 +56,7 @@ final readonly class CatalogCardResolver
         string $finish,
         bool $allowRemoteSearch,
     ): CatalogResolutionResult {
-        $localCard = $this->matchLocalCard($name, $setCode, $collectorNumber, $rarity, $finish);
+        $localCard = $this->matchLocal($name, $setCode, $collectorNumber, $rarity, $finish);
         if ($localCard instanceof Card) {
             return new CatalogResolutionResult($localCard);
         }
@@ -214,7 +214,7 @@ final readonly class CatalogCardResolver
 
     private function normalizeMatchValue(string $value): string
     {
-        return strtolower(trim($value));
+        return (string) preg_replace('~\s+~', ' ', strtolower(trim($value)));
     }
 
     private function normalizeRarity(string $value): string
@@ -241,17 +241,7 @@ final readonly class CatalogCardResolver
         }
 
         foreach ($cards as $card) {
-            if (!$this->matchesFilters(
-                $card,
-                strtolower($setCode),
-                strtolower($collectorNumber),
-                strtolower($rarity),
-                $finish,
-            )) {
-                continue;
-            }
-
-            if ($this->normalizeMatchValue($card->getName()) === $this->normalizeMatchValue($name)) {
+            if ($this->isAcceptableMatch($card, $name, $setCode, $collectorNumber, $rarity, $finish)) {
                 return $card;
             }
         }
@@ -259,29 +249,83 @@ final readonly class CatalogCardResolver
         return null;
     }
 
-    private function matchLocalCard(
+    /**
+     * Local catalog match for a printing.
+     *
+     * Primary path: the natural key (set code + collector number) via an
+     * indexed exact lookup — every import row carries both, and unlike the
+     * old name-substring scan this stays O(log n) as the catalog grows and
+     * cannot miss printings that fall outside a name-search result limit
+     * (e.g. the hundreds of "Forest" printings). Name search remains as a
+     * fallback for rows without a collector number.
+     */
+    public function matchLocal(
         string $name,
         string $setCode,
         string $collectorNumber,
         string $rarity,
         string $finish,
     ): ?Card {
-        foreach ($this->cardRepository->searchByName($name, 20) as $card) {
-            if (!$this->matchesFilters(
-                $card,
-                strtolower($setCode),
-                strtolower($collectorNumber),
-                strtolower($rarity),
-                $finish,
-            )) {
-                continue;
+        if ('' !== trim($setCode) && '' !== trim($collectorNumber)) {
+            foreach ($this->cardRepository->findByNaturalKey($setCode, $collectorNumber) as $card) {
+                if ($this->isAcceptableMatch($card, $name, $setCode, $collectorNumber, $rarity, $finish)) {
+                    return $card;
+                }
             }
+        }
 
-            if ($this->normalizeMatchValue($card->getName()) === $this->normalizeMatchValue($name)) {
+        foreach ($this->cardRepository->searchByName($name, 20) as $card) {
+            if ($this->isAcceptableMatch($card, $name, $setCode, $collectorNumber, $rarity, $finish)) {
                 return $card;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Full acceptance check for a candidate card against an import row:
+     * the structural filters (set / collector number / rarity / finish)
+     * plus the name comparison. Shared by the local matcher, the Scryfall
+     * search fallback, and the CSV batch pre-resolution.
+     */
+    public function isAcceptableMatch(
+        Card $card,
+        string $name,
+        string $setCode,
+        string $collectorNumber,
+        string $rarity,
+        string $finish,
+    ): bool {
+        return $this->matchesFilters(
+            $card,
+            strtolower($setCode),
+            strtolower($collectorNumber),
+            strtolower($rarity),
+            $finish,
+        ) && $this->nameMatches($card, $name);
+    }
+
+    /**
+     * Name comparison tolerant of multi-face formatting: vendors export
+     * split/transform cards as "Fire // Ice", "Fire//Ice", or just the
+     * front face "Fire". All should match the catalog's "Fire // Ice".
+     */
+    private function nameMatches(Card $card, string $name): bool
+    {
+        $cardName = $this->normalizeMatchValue($card->getName());
+        $rowName = $this->normalizeMatchValue($name);
+        if ($cardName === $rowName) {
+            return true;
+        }
+
+        $canonicalCard = (string) preg_replace('~\s*//\s*~', ' // ', $cardName);
+        $canonicalRow = (string) preg_replace('~\s*//\s*~', ' // ', $rowName);
+        if ($canonicalCard === $canonicalRow) {
+            return true;
+        }
+
+        // Front-face-only row names ("Fire" for "Fire // Ice").
+        return explode(' // ', $canonicalCard)[0] === $canonicalRow;
     }
 }

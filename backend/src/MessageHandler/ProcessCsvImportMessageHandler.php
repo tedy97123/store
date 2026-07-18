@@ -11,6 +11,7 @@ use App\Repository\CsvImportJobRepository;
 use App\Repository\CsvImportRowRepository;
 use App\Service\Catalog\CatalogCardResolver;
 use App\Service\Inventory\StoreInventoryWriter;
+use App\Service\Scryfall\ScryfallClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -23,6 +24,7 @@ final readonly class ProcessCsvImportMessageHandler
         private CsvImportJobRepository $jobRepository,
         private CsvImportRowRepository $rowRepository,
         private CatalogCardResolver $catalogCardResolver,
+        private ScryfallClient $scryfallClient,
         private StoreInventoryWriter $inventoryWriter,
         private EntityManagerInterface $entityManager,
         private ManagerRegistry $managerRegistry,
@@ -66,21 +68,37 @@ final readonly class ProcessCsvImportMessageHandler
                 return;
             }
 
+            // Resolve the whole batch up front: local natural-key matches first,
+            // then ONE Scryfall collection call (75 identifiers per request) for
+            // the misses — instead of a rate-limited search round-trip per row.
+            $preResolved = $this->preResolveRows($rows);
+
+            /** @var list<array{CsvImportRow, \App\Entity\InventoryItem}> $pendingItemLinks */
+            $pendingItemLinks = [];
+
             foreach ($rows as $row) {
                 // Rows are already marked PROCESSING by claimNextQueued().
                 $row->setError(null);
-                $resolution = $this->catalogCardResolver->resolve(
-                    $row->getName(),
-                    $row->getSetCode(),
-                    $row->getCollectorNumber(),
-                    $row->getRarity(),
-                    $row->isFoil() ? 'foil' : 'nonfoil',
-                );
+                $card = $preResolved[spl_object_id($row)] ?? null;
 
-                if (!$resolution->isResolved() || !$resolution->card instanceof Card) {
-                    $row->setStatus(CsvImportRow::STATUS_ERROR);
-                    $row->setError($resolution->error ?? 'No matching MTGJSON or Scryfall printing found.');
-                    continue;
+                if (!$card instanceof Card) {
+                    // Slow path for rows the batch couldn't place: full resolver
+                    // (local → Scryfall search → MTGJSON) with its error detail.
+                    $resolution = $this->catalogCardResolver->resolve(
+                        $row->getName(),
+                        $row->getSetCode(),
+                        $row->getCollectorNumber(),
+                        $row->getRarity(),
+                        $row->isFoil() ? 'foil' : 'nonfoil',
+                    );
+
+                    if (!$resolution->isResolved() || !$resolution->card instanceof Card) {
+                        $row->setStatus(CsvImportRow::STATUS_ERROR);
+                        $row->setError($resolution->error ?? 'No matching MTGJSON or Scryfall printing found.');
+                        continue;
+                    }
+
+                    $card = $resolution->card;
                 }
 
                 $notes = [
@@ -93,7 +111,7 @@ final readonly class ProcessCsvImportMessageHandler
 
                 $item = $this->inventoryWriter->write(
                     $store,
-                    $resolution->card,
+                    $card,
                     $quantity,
                     $condition,
                     $row->isFoil(),
@@ -102,14 +120,91 @@ final readonly class ProcessCsvImportMessageHandler
                 );
 
                 $row->setStatus(CsvImportRow::STATUS_IMPORTED);
-                $row->setCard($this->serializeImportCard($resolution->card));
+                $row->setCard($this->serializeImportCard($card));
                 $row->setImportedItemId($item->getId());
+                if (null === $item->getId()) {
+                    // Freshly created items have no id until the batch flush;
+                    // link them afterwards so the row always references its item.
+                    $pendingItemLinks[] = [$row, $item];
+                }
             }
 
-            $this->flushBatchAndQueueNext($job);
+            $this->flushBatchAndQueueNext($job, $pendingItemLinks);
         } catch (\Throwable $e) {
             $this->markJobFailed($message->jobId, $e);
         }
+    }
+
+    /**
+     * Batch card resolution for a claimed set of rows.
+     *
+     * Phase 1 matches each row against the local catalog by natural key
+     * (indexed set + collector number). Phase 2 sends all remaining rows to
+     * Scryfall's collection endpoint in chunks of 75 identifiers — turning
+     * up to N rate-limited searches into ceil(N/75) requests. Anything still
+     * unmatched falls through to the caller's per-row resolver.
+     *
+     * @param list<CsvImportRow> $rows
+     *
+     * @return array<int, Card> keyed by spl_object_id() of the row
+     */
+    private function preResolveRows(array $rows): array
+    {
+        $resolved = [];
+        $missing = [];
+
+        foreach ($rows as $row) {
+            $finish = $row->isFoil() ? 'foil' : 'nonfoil';
+            $card = $this->catalogCardResolver->matchLocal(
+                $row->getName(),
+                $row->getSetCode(),
+                $row->getCollectorNumber(),
+                $row->getRarity(),
+                $finish,
+            );
+
+            if ($card instanceof Card) {
+                $resolved[spl_object_id($row)] = $card;
+                continue;
+            }
+
+            if ('' !== trim($row->getSetCode()) && '' !== trim($row->getCollectorNumber())) {
+                $missing[] = $row;
+            }
+        }
+
+        if ([] === $missing) {
+            return $resolved;
+        }
+
+        try {
+            $fetched = $this->scryfallClient->fetchCollectionBySetCollectors(array_map(
+                static fn (CsvImportRow $row): array => [
+                    'set' => $row->getSetCode(),
+                    'collectorNumber' => $row->getCollectorNumber(),
+                ],
+                $missing,
+            ));
+        } catch (\Throwable) {
+            // Batch fetch is an optimisation; rows fall back to per-row resolution.
+            return $resolved;
+        }
+
+        foreach ($missing as $row) {
+            $card = $fetched[ScryfallClient::collectionKey($row->getSetCode(), $row->getCollectorNumber())] ?? null;
+            if ($card instanceof Card && $this->catalogCardResolver->isAcceptableMatch(
+                $card,
+                $row->getName(),
+                $row->getSetCode(),
+                $row->getCollectorNumber(),
+                $row->getRarity(),
+                $row->isFoil() ? 'foil' : 'nonfoil',
+            )) {
+                $resolved[spl_object_id($row)] = $card;
+            }
+        }
+
+        return $resolved;
     }
 
     /** @return array<string, mixed> */
@@ -128,10 +223,25 @@ final readonly class ProcessCsvImportMessageHandler
         ];
     }
 
-    private function flushBatchAndQueueNext(CsvImportJob $job): void
+    /** @param list<array{CsvImportRow, \App\Entity\InventoryItem}> $pendingItemLinks */
+    private function flushBatchAndQueueNext(CsvImportJob $job, array $pendingItemLinks = []): void
     {
         $this->syncCounters($job);
         $this->entityManager->flush();
+
+        // Newly created inventory items received their ids in the flush above;
+        // backfill the imported_item_id on rows that pointed at them.
+        $linked = false;
+        foreach ($pendingItemLinks as [$row, $item]) {
+            if (null !== $item->getId() && $row->getImportedItemId() !== $item->getId()) {
+                $row->setImportedItemId($item->getId());
+                $linked = true;
+            }
+        }
+        if ($linked) {
+            $this->entityManager->flush();
+        }
+
         $this->entityManager->refresh($job);
 
         if (CsvImportJob::STATUS_PROCESSING !== $job->getStatus()) {

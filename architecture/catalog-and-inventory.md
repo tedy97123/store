@@ -28,15 +28,15 @@ flowchart LR
     end
     deb --> q -->|"GET /api/catalog/search"| rt["🌐 GET /api/catalog/search<br/>#IsGranted('ROLE_USER')"]
     rt --> c["🎛️ CardSearchController::search()"]
-    c --> local["🗄️ CardRepository::searchByName()<br/>LOWER(name) LIKE, limit 60"]
+    c --> local["🗄️ CardRepository::searchByName()<br/>LOWER(name) LIKE (trigram-indexed), limit 60"]
     local --> db[("cards SELECT")]
     c --> resolver["⚙️ CatalogCardResolver::matchesFilters()/serializeCard()"]
-    c -.->|"few local hits"| scry["⚙️ ScryfallClient::searchRemoteAndUpsert()<br/>→ Scryfall API, upsert into cards"]
+    c -.->|"only if < 15 local hits"| scry["⚙️ ScryfallClient::searchRemoteAndUpsert()<br/>→ Scryfall API, upsert into cards"]
     scry --> db
     c -->|"merged card list"| q
 ```
 
-Searches the local catalog first; if results are thin it falls back to Scryfall live search and **upserts** the fetched cards into `cards` so subsequent searches are local.
+**Local-first**: the local catalog (trigram-indexed `LIKE`) is searched first; the Scryfall live search + upsert only runs when the filtered local result set is thin (fewer than `REMOTE_FALLBACK_THRESHOLD = 15` cards). As bulk syncs and past imports fill the `cards` table, per-keystroke remote API calls and catalog writes disappear.
 
 | Layer | Where |
 |-------|-------|
@@ -52,15 +52,15 @@ Searches the local catalog first; if results are thin it falls back to Scryfall 
 
 ```mermaid
 flowchart LR
-    sp["🖥️ StorePage.tsx<br/>api.get('/stores/{slug}/inventory')<br/>(client-side filters + 24/page)"] -->|"GET"| rt["🌐 GET /api/stores/{slug}/inventory"]
+    sp["🖥️ useInventory hook<br/>walks ?page=N&itemsPerPage=500<br/>until a short page"] -->|"GET (per page)"| rt["🌐 GET /api/stores/{slug}/inventory"]
     rt --> tenant["TenantSubscriber sets Store"]
-    tenant --> prov["🎛️ StoreInventoryCollectionProvider::provide()"]
-    prov --> repo["🗄️ InventoryItemRepository::findByStore()<br/>JOIN card, ORDER BY name"]
+    tenant --> prov["🎛️ StoreInventoryCollectionProvider::provide()<br/>page/itemsPerPage (cap 500)"]
+    prov --> repo["🗄️ InventoryItemRepository::findPageByStore()<br/>JOIN card, ORDER BY name, id · LIMIT/OFFSET"]
     repo --> db[("inventory_items ⋈ cards<br/>SELECT WHERE store_id")]
-    prov -->|"InventoryItem[] + nested Card"| sp
+    prov -->|"one page of InventoryItem[] + nested Card"| sp
 ```
 
-Filtering (search, set, color, price, foil) and pagination happen **client-side** over the fetched list. Card tiles render via `components/cards/CardTile.tsx`.
+The collection is **server-paginated** (`?page=` / `?itemsPerPage=`, capped at 500/page, ordered by card name with `id` as a stable tiebreaker) so a single request never hydrates a store's whole inventory — the response size and backend memory stay bounded no matter how large a store grows. `useInventory` walks the pages sequentially and aggregates them, so page components still receive the complete list; filtering (search, set, color, price, foil) and UI pagination happen **client-side** over that aggregate. Card tiles render via `components/cards/CardTile.tsx`.
 
 ---
 
@@ -120,32 +120,35 @@ The **spotlight carousel** on the storefront isn't a separate endpoint — it fi
 
 ```mermaid
 sequenceDiagram
-    participant Trigger as POST /api/admin/scryfall/sync (or CLI app:scryfall:sync)
-    participant Ctl as ScryfallSyncController / Command
-    participant SC as ScryfallClient::syncOracleCards()
+    participant Trigger as CLI app:scryfall:sync (or POST /api/admin/scryfall/sync)
+    participant Ctl as ScryfallSyncCommand / Controller
+    participant SC as ScryfallClient::syncBulkCards(type)
     participant API as Scryfall bulk API
-    participant EM as Doctrine EntityManager
+    participant UP as ScryfallCardUpserter
     participant DB as cards table
 
     Trigger->>Ctl: (ROLE_SUPER_ADMIN)
-    Ctl->>SC: syncOracleCards(onProgress)
-    SC->>API: getOracleCardsBulkInfo() → download ~169MB JSON
-    loop batches of 500
-        SC->>SC: upsertFromScryfallData(card)
-        SC->>DB: CardRepository::find(id) (exists?)
-        SC->>EM: persist (insert) or update
-        SC->>EM: flush() + clear()
+    Ctl->>SC: syncBulkCards(onProgress, type)
+    SC->>API: getBulkInfo(type) → stream JSON to temp file
+    loop JsonMachine streams one card at a time, batches of 200
+        SC->>UP: upsertMany(batch)
+        UP->>DB: multi-row INSERT … ON CONFLICT (id) DO UPDATE
     end
     SC-->>Ctl: {inserted, updated, total}
 ```
 
-Batched (500/flush) with `EntityManager::clear()` between batches to keep memory bounded across ~30–40k cards. Super-admin only.
+Two datasets (`ScryfallClient::BULK_TYPES`):
+
+- **`default_cards`** (CLI default) — **every printing** (~450k rows). This is the dataset that lets the catalog resolve store imports (which identify a printing by set + collector number) without any API fallback. Run via `php bin/console app:scryfall:sync` (streams, safe to run long; schedule via cron to keep prices fresh).
+- **`oracle_cards`** (HTTP endpoint default) — one representative printing per Oracle ID (~35k rows). Smaller/faster; enough for rules text and name search, **not** enough to resolve printings. The synchronous admin endpoint defaults to this so the request stays inside HTTP timeouts; it accepts `{"type": "default_cards"}` but the CLI is the recommended path for full syncs.
+
+The whole pipeline is **streaming + ORM-free**: the bulk body is streamed to a temp file, `JsonMachine` iterates the top-level array without materialising it, and `ScryfallCardUpserter` writes multi-row native `INSERT … ON CONFLICT (id) DO UPDATE` batches — no decoded card list, no entity hydration, no unit-of-work growth. Memory stays flat even for the multi-hundred-MB `default_cards` file, and `ON CONFLICT` makes concurrent writes (sync racing import workers) safe.
 
 | Layer | Where |
 |-------|-------|
-| Trigger | `Controller/ScryfallSyncController::sync()` or `Command/ScryfallSyncCommand` |
-| Service | `Service/Scryfall/ScryfallClient::syncOracleCards` |
-| Repo/DB | `CardRepository` → `cards` (upsert) |
+| Trigger | `Command/ScryfallSyncCommand` (`--type=`) or `Controller/ScryfallSyncController::sync()` |
+| Service | `Service/Scryfall/ScryfallClient::syncBulkCards` |
+| Writer | `Service/Scryfall/ScryfallCardUpserter` → `cards` (native upsert) |
 
 ---
 
@@ -155,14 +158,20 @@ Shared by catalog search and CSV import. `CatalogCardResolver::resolve(name, set
 
 ```mermaid
 flowchart TD
-    start["resolve(name, set, collector#, rarity, finish)"] --> local["1. matchLocalCard()<br/>CardRepository::searchByName + matchesFilters"]
-    local -->|hit| done([✅ CatalogResolutionResult.card])
-    local -->|miss| scry["2. resolveViaScryfallSearch()<br/>ScryfallClient::searchRemoteAndUpsert()"]
+    start["resolve(name, set, collector#, rarity, finish)"] --> nk["1a. matchLocal(): natural key<br/>CardRepository::findByNaturalKey(set, collector#)<br/>(indexed exact lookup)"]
+    nk -->|hit| done([✅ CatalogResolutionResult.card])
+    nk -->|miss| byname["1b. matchLocal(): name fallback<br/>CardRepository::searchByName + filters"]
+    byname -->|hit| done
+    byname -->|miss| scry["2. resolveViaScryfallSearch()<br/>ScryfallClient::searchRemoteAndUpsert()"]
     scry -->|hit| done
     scry -->|miss| mtg["3. matchMtgJsonCard()<br/>MTGJsonClient::getSetCards()"]
     mtg -->|hit| done
     mtg -->|miss| err([⛔ result.error])
 ```
+
+Local matching tries the **printing natural key first** — `(set_code, collector_number)` via the `idx_card_set_collector` expression index — and only falls back to name search for rows without a collector number. Name comparison is tolerant of multi-face formats: `"Fire // Ice"`, `"Fire//Ice"`, and front-face-only `"Fire"` all match the catalog's `"Fire // Ice"`.
+
+The CSV import worker adds a **batch layer** above this cascade: each claimed batch is pre-resolved with local natural-key matches plus ONE Scryfall collection call (75 identifiers/request) for the misses, so `resolve()`'s per-row remote legs only run for rows the batch couldn't place (see [csv-import.md](csv-import.md)).
 
 Scryfall is attempted before MTGJSON so normal failed-row recovery and CSV retry paths avoid downloading large set files when the exact printing can be found by Scryfall search. MTGJSON remains the final fallback, and oversized/problematic set payloads are skipped to keep the worker within memory limits.
 
@@ -170,3 +179,12 @@ Scryfall is attempted before MTGJSON so normal failed-row recovery and CSV retry
 |-------|-------|
 | Resolver | `Service/Catalog/CatalogCardResolver`, DTO `DTO/CatalogResolutionResult` |
 | Sources | `CardRepository` (local), `Service/MTGJson/MTGJsonClient`, `Service/Scryfall/ScryfallClient` |
+
+---
+
+## Scryfall API discipline
+
+All live Scryfall calls (`searchRemoteAndUpsert`, `fetchCardById`, `fetchCollectionBySetCollectors`) go through two shared safeguards in `Service/Scryfall/`:
+
+- **`ScryfallRateLimiter`** — a cross-process throttle (~8 req/s) serialised through an `flock()`'d timestamp file, so any number of web workers + messenger workers on a host share ONE budget instead of multiplying it. (Single-host only; move to a Redis token bucket if the app is ever scaled across machines.)
+- **`ScryfallCardUpserter`** — every card payload is written with native `INSERT … ON CONFLICT (id) DO UPDATE`, so concurrent workers upserting the same card can never collide on the primary key (the old find→persist→flush path crashed whole import batches on that race). After an upsert, `ScryfallClient` re-reads the entity with `refresh()` so the ORM identity map never serves stale data.
