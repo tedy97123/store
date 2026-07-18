@@ -113,3 +113,20 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Single aggregating check to require in branch protection: it only passes
+  # when BOTH jobs above succeed, so one required status covers the whole suite
+  # (and new jobs are covered automatically once added to `needs`).
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "A required CI job failed or was cancelled."
+          exit 1
+      - name: All required jobs passed
+        run: echo "Backend and frontend checks passed."

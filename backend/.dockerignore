@@ -1,0 +1,28 @@
+# Keep the build context small and never ship dev/local artifacts or secrets.
+.git
+.gitignore
+.gitattributes
+.editorconfig
+.idea
+
+# Dependencies / build output are installed inside the image.
+vendor/
+var/
+public/bundles/
+
+# Tests and CI are not part of the runtime image.
+tests/
+phpunit.dist.xml
+.phpunit.cache/
+.env.test
+
+# Local overrides & real secrets must never enter the image — they are injected
+# as environment variables at runtime.
+.env.local
+.env.*.local
+config/jwt/*.pem
+
+# Docker files themselves.
+Dockerfile
+.dockerignore
+compose*.yaml

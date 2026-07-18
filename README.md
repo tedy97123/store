@@ -284,6 +284,75 @@ cd frontend
 npm run lint && npx tsc --noEmit && npm run build
 ```
 
+### Requiring green CI before merge (branch protection)
+
+CI already runs on every pull request. To make it a **merge gate**, a repository
+admin enables branch protection once (GitHub → *Settings → Branches → Add branch
+ruleset*, or *Branches → Add rule* for `master`):
+
+- **Require status checks to pass before merging** → add the **`CI success`**
+  check. That single job aggregates the backend and frontend jobs (it only
+  passes when both do), so you require one check and new jobs are covered
+  automatically as they're added to its `needs` list.
+- Recommended alongside: *Require a pull request before merging* and *Require
+  branches to be up to date before merging*.
+
+Until protection is enabled, CI still reports pass/fail on each PR — it just
+isn't enforced.
+
+---
+
+## Production configuration
+
+**Secrets are never read from the committed `.env` in production.** The values in
+`backend/.env` are development-only defaults; override every secret with real
+environment variables injected by your platform or secrets manager:
+
+| Variable | Notes |
+|----------|-------|
+| `APP_ENV` | Set to `prod`. |
+| `APP_SECRET` | Fresh random value (e.g. `openssl rand -hex 16`). |
+| `DATABASE_URL` | Production PostgreSQL DSN. |
+| `JWT_PASSPHRASE` | Passphrase for the JWT keypair; generate the keypair in the target environment (`bin/console lexik:jwt:generate-keypair`) — the `.pem` files are gitignored and never shipped. |
+| `CORS_ALLOW_ORIGIN` | Regex for your real frontend origin(s). |
+| `MAILER_DSN` | Production SMTP. |
+
+The `.pem` keys and `.env.local` are excluded from the Docker build context
+(`backend/.dockerignore`), so secrets can't be baked into an image.
+
+### Container image
+
+`backend/Dockerfile` is a multi-stage production build (Composer `--no-dev` +
+optimized autoloader → [FrankenPHP](https://frankenphp.dev) runtime with OPcache
+and `opcache.validate_timestamps=0`):
+
+```bash
+cd backend
+docker build -t mtg-store-backend .
+docker run -p 8000:8000 \
+  -e APP_ENV=prod \
+  -e APP_SECRET="$(openssl rand -hex 16)" \
+  -e DATABASE_URL="postgresql://user:pass@db-host:5432/store?serverVersion=16" \
+  -e JWT_PASSPHRASE="…" \
+  mtg-store-backend
+```
+
+Run migrations against the production database as a release step
+(`php bin/console doctrine:migrations:migrate --no-interaction`), and sync the
+catalog via the worker (`php bin/console app:scryfall:sync`).
+
+### Health probes
+
+Two unauthenticated endpoints (outside the `/api` JWT firewall) for load
+balancers and orchestrators:
+
+| Endpoint | Purpose | Behavior |
+|----------|---------|----------|
+| `GET /health` | Liveness | `200 {"status":"ok"}` — no I/O; is the process up? |
+| `GET /health/ready` | Readiness | Pings the DB; `200` when reachable, `503` when not (pull the instance from rotation). |
+
+The Docker image's `HEALTHCHECK` hits `/health`.
+
 ---
 
 ## Troubleshooting
