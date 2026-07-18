@@ -31,6 +31,9 @@ final class StoreCsvImportController extends AbstractController
 {
     private const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
+    /** Failed-row preview window — bounds per-request Scryfall fan-out. */
+    private const FAILED_PREVIEW_MAX_ROWS = 300;
+
     /** @var list<string> */
     private const ALLOWED_MIME_TYPES = [
         'text/csv',
@@ -270,10 +273,16 @@ final class StoreCsvImportController extends AbstractController
             return $this->json(['detail' => 'Import is already running. Pause or wait for it to finish before resolving failed cards.'], 409);
         }
 
+        // Bounded: each 75 identifiers cost one rate-limited Scryfall request,
+        // so previewing ALL failed rows of a 50k-row job would pin a PHP
+        // worker for minutes and drain the host-global API budget. Preview a
+        // window; after finalizing, re-running the preview serves the rest.
         $rows = $this->rowRepository->findBy(
             ['job' => $job, 'status' => CsvImportRow::STATUS_ERROR],
             ['rowIndex' => 'ASC'],
+            self::FAILED_PREVIEW_MAX_ROWS,
         );
+        $totalFailed = $this->rowRepository->count(['job' => $job, 'status' => CsvImportRow::STATUS_ERROR]);
 
         $collectionMatches = $this->scryfallClient->fetchCollectionBySetCollectors(array_map(
             static fn (CsvImportRow $row): array => [
@@ -319,7 +328,11 @@ final class StoreCsvImportController extends AbstractController
             $results[] = $result;
         }
 
-        return $this->json(['results' => $results]);
+        return $this->json([
+            'results' => $results,
+            'totalFailedRows' => $totalFailed,
+            'remainingFailedRows' => max(0, $totalFailed - count($rows)),
+        ]);
     }
 
     #[Route('/{id}/failed/manual-import', name: 'api_store_csv_import_failed_manual_import', methods: ['POST'])]

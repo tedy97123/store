@@ -309,10 +309,12 @@ export interface AdminUser {
 }
 
 export interface ScryfallSyncResult {
+  /** 'queued' — the sync now runs asynchronously on the messenger worker. */
   status: string
-  inserted: number
-  updated: number
-  total: number
+  type?: string
+  inserted?: number
+  updated?: number
+  total?: number
 }
 
 export interface OrderLine {

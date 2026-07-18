@@ -2,10 +2,12 @@
 
 namespace App\Controller;
 
+use App\Message\SyncScryfallCatalogMessage;
 use App\Service\Scryfall\ScryfallClient;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -13,15 +15,17 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class ScryfallSyncController extends AbstractController
 {
     public function __construct(
-        private readonly ScryfallClient $scryfallClient,
+        private readonly MessageBusInterface $messageBus,
     ) {
     }
 
     /**
-     * Synchronous bulk sync. Defaults to the smaller `oracle_cards` dataset
-     * so the request stays within HTTP timeout territory; the full
-     * `default_cards` (all printings) sync should run via the CLI/cron:
-     * `php bin/console app:scryfall:sync` (streams, safe to run long).
+     * Queues a bulk sync on the messenger worker and returns 202. Even the
+     * small `oracle_cards` dataset takes minutes of download + upsert —
+     * running it inline pinned a PHP worker past typical proxy timeouts,
+     * and `default_cards` (every printing) runs far longer. Progress is
+     * visible in the worker logs; the CLI (`app:scryfall:sync`) remains the
+     * interactive option.
      */
     #[Route('/sync', name: 'api_admin_scryfall_sync', methods: ['POST'])]
     #[IsGranted('ROLE_SUPER_ADMIN')]
@@ -38,14 +42,11 @@ class ScryfallSyncController extends AbstractController
             ], 400);
         }
 
-        $result = $this->scryfallClient->syncBulkCards(null, $type);
+        $this->messageBus->dispatch(new SyncScryfallCatalogMessage($type));
 
         return $this->json([
-            'status' => 'completed',
+            'status' => 'queued',
             'type' => $type,
-            'inserted' => $result['inserted'],
-            'updated' => $result['updated'],
-            'total' => $result['total'],
-        ]);
+        ], 202);
     }
 }

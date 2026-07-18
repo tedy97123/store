@@ -93,7 +93,7 @@ class CsvImportRowRepository extends ServiceEntityRepository
 
             /** @noinspection SqlNoDataSourceInspection */
             $connection->executeStatement(
-                'UPDATE csv_import_rows SET status = :processing WHERE id IN (:ids)',
+                'UPDATE csv_import_rows SET status = :processing, claimed_at = NOW() WHERE id IN (:ids)',
                 [
                     'processing' => CsvImportRow::STATUS_PROCESSING,
                     'ids' => $ids,
@@ -174,17 +174,34 @@ class CsvImportRowRepository extends ServiceEntityRepository
             ->execute();
     }
 
-    public function requeueProcessingRows(CsvImportJob $job): int
+    /**
+     * Requeues PROCESSING rows back to QUEUED.
+     *
+     * With $claimedBefore set, only rows whose claim is older than the
+     * cutoff (or has no timestamp — legacy rows) are requeued. This is how
+     * job-completion logic recovers rows abandoned by a crashed handler
+     * WITHOUT stealing rows a live handler claimed moments ago — requeueing
+     * live rows lets a second worker import them in parallel and the
+     * inventory quantities double.
+     */
+    public function requeueProcessingRows(CsvImportJob $job, ?\DateTimeImmutable $claimedBefore = null): int
     {
-        return $this->createQueryBuilder('row')
+        $qb = $this->createQueryBuilder('row')
             ->update()
             ->set('row.status', ':queued')
+            ->set('row.claimedAt', ':nullClaim')
             ->andWhere('row.job = :job')
             ->andWhere('row.status = :processing')
             ->setParameter('queued', CsvImportRow::STATUS_QUEUED)
+            ->setParameter('nullClaim', null)
             ->setParameter('job', $job)
-            ->setParameter('processing', CsvImportRow::STATUS_PROCESSING)
-            ->getQuery()
-            ->execute();
+            ->setParameter('processing', CsvImportRow::STATUS_PROCESSING);
+
+        if (null !== $claimedBefore) {
+            $qb->andWhere('row.claimedAt IS NULL OR row.claimedAt < :claimedBefore')
+                ->setParameter('claimedBefore', $claimedBefore);
+        }
+
+        return $qb->getQuery()->execute();
     }
 }

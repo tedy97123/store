@@ -41,10 +41,21 @@ final readonly class StoreInventoryCollectionProvider implements ProviderInterfa
         }
 
         $filters = is_array($context['filters'] ?? null) ? $context['filters'] : [];
-        $page = max(1, (int) ($filters['page'] ?? 1));
         $itemsPerPage = (int) ($filters['itemsPerPage'] ?? self::DEFAULT_ITEMS_PER_PAGE);
         $itemsPerPage = min(self::MAX_ITEMS_PER_PAGE, max(1, $itemsPerPage));
 
+        // Keyset path (preferred; used by the frontend walk): ?afterId=N
+        // returns the next id-ordered slice. O(page) via the (store_id, id)
+        // index, no COUNT query, and immune to concurrent-write page drift
+        // (an OFFSET walk both skips and duplicates rows when items are
+        // inserted/deleted between page requests).
+        if (isset($filters['afterId'])) {
+            $afterId = max(0, (int) $filters['afterId']);
+
+            return $this->inventoryRepository->findByStoreAfterId($store, $afterId, $itemsPerPage);
+        }
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
         $items = $this->inventoryRepository->findPageByStore($store, ($page - 1) * $itemsPerPage, $itemsPerPage);
         $total = $this->inventoryRepository->countByStore($store);
 

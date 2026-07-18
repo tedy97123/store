@@ -85,6 +85,7 @@ flowchart TD
 
 - The unique key `(store, card, condition, is_foil)` means adding a card that already exists **merges** into the existing line (quantity/price update) rather than duplicating. A PATCH that would collide with another line also merges.
 - `StoreInventoryWriter` lazily enriches the `Card` from Scryfall (prices/images) when needed.
+- **Concurrency:** the immediate web write path (`flush=true`) merges via a native `INSERT … ON CONFLICT (store_id, card_id, condition, is_foil) DO UPDATE SET quantity = quantity + EXCLUDED.quantity`, so two simultaneous adds to the same line can neither collide on the unique index nor lose an increment (the old check-then-insert + read-modify-write). The batch import path (`flush=false`) instead applies into the shared unit of work and lets the CSV handler flush and recover the whole batch. `inventory_items.version` (optimistic lock) additionally turns any stale ORM update into a fail-fast conflict rather than silent stock drift.
 
 | Layer | Where |
 |-------|-------|
@@ -118,16 +119,18 @@ The **spotlight carousel** on the storefront isn't a separate endpoint — it fi
 
 ## Scryfall bulk sync
 
+The HTTP endpoint **dispatches** a `SyncScryfallCatalogMessage` and returns `202` immediately — the multi-minute (`oracle_cards`) to multi-hour (`default_cards`) download + upsert runs in a messenger worker (`SyncScryfallCatalogMessageHandler`), not inline in the request, so it can't be killed by a proxy/FPM timeout. The CLI runs the same `syncBulkCards()` synchronously for interactive use.
+
 ```mermaid
 sequenceDiagram
-    participant Trigger as CLI app:scryfall:sync (or POST /api/admin/scryfall/sync)
-    participant Ctl as ScryfallSyncCommand / Controller
+    participant Trigger as CLI app:scryfall:sync (sync) / POST /api/admin/scryfall/sync (→ queue)
+    participant Ctl as ScryfallSyncCommand / Controller+Worker
     participant SC as ScryfallClient::syncBulkCards(type)
     participant API as Scryfall bulk API
     participant UP as ScryfallCardUpserter
     participant DB as cards table
 
-    Trigger->>Ctl: (ROLE_SUPER_ADMIN)
+    Trigger->>Ctl: (ROLE_SUPER_ADMIN; endpoint dispatches to worker, returns 202)
     Ctl->>SC: syncBulkCards(onProgress, type)
     SC->>API: getBulkInfo(type) → stream JSON to temp file
     loop JsonMachine streams one card at a time, batches of 200

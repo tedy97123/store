@@ -85,16 +85,25 @@ sequenceDiagram
 
 Rather than one long-running handler, each message processes **25 rows** then enqueues the next batch. This gives:
 
-- **Exactly-once rows** - `CsvImportRowRepository::claimNextQueued()` wraps a `SELECT ... FOR UPDATE SKIP LOCKED` plus `UPDATE ... status='processing'` in a transaction, so concurrent workers never grab the same rows and a crash mid-batch does not double-import.
+- **Exactly-once rows** - `CsvImportRowRepository::claimNextQueued()` wraps a `SELECT ... FOR UPDATE SKIP LOCKED` plus `UPDATE ... status='processing', claimed_at=NOW()` in a transaction, so concurrent workers never grab the same rows and a crash mid-batch does not double-import.
 - **Bounded memory / flushes** - inventory writes use `flush=false` and are flushed once per batch, not per row.
 - **Progress visibility** - job counters (`processed/imported/failed_rows`) are recomputed and flushed each batch, so polling shows steady movement.
+
+### Concurrency hardening
+
+Multiple workers can process one job in parallel (the SKIP-LOCKED claim is built for it), and users can pause/resume/retry mid-run. Several races are closed explicitly:
+
+- **Live vs. abandoned rows.** `claimNextQueued` stamps `claimed_at`. When a worker finds zero queued rows but some still `processing`, `completeJob` only requeues rows whose claim is older than `STALE_CLAIM_SECONDS` (crashed handler) — a live handler's freshly claimed rows are left alone, and a delayed re-check message keeps the job alive in case that handler dies. Requeueing live rows was a double-import: a second worker would re-import them while the first was still writing.
+- **Guarded state transitions.** `queued/processing → processing` (batch start) and `processing → completed` are conditional `UPDATE ... WHERE status IN (...)` statements, so a pause/cancel committed by the controller in the same window is never silently overwritten by a blind `setStatus()+flush()`.
+- **Contended inventory lines.** If two batches touch the same `(store, card, condition, is_foil)` tuple, the losing batch flush throws a unique-violation / optimistic-lock error; the handler catches it, requeues *its* claimed rows, and re-dispatches — the re-run finds the winner's row and merges instead of failing the whole job.
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued: upload
     queued --> processing: worker claims rows
-    processing --> completed: no rows left
-    processing --> failed: unhandled exception
+    processing --> completed: no rows left (guarded transition)
+    processing --> failed: unhandled exception (never over completed/cancelled)
+    processing --> processing: contended batch requeued + retried
     processing --> paused: POST /pause
     paused --> queued: POST /resume (requeue)
     failed --> queued: POST /retry

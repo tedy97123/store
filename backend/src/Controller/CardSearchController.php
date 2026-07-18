@@ -20,6 +20,14 @@ class CardSearchController extends AbstractController
      */
     private const REMOTE_FALLBACK_THRESHOLD = 15;
 
+    /**
+     * Hard cap on resolve-batch rows per request. Each unresolvable row can
+     * cost remote lookups against the host-global Scryfall budget, so an
+     * unbounded array from any authenticated user was a platform-wide DoS
+     * vector (50k bogus rows ≈ hours of monopolised rate-limiter time).
+     */
+    private const MAX_RESOLVE_BATCH_ROWS = 100;
+
     public function __construct(
         private readonly CardRepository $cardRepository,
         private readonly ScryfallClient $scryfallClient,
@@ -82,6 +90,11 @@ class CardSearchController extends AbstractController
         /** @var array{rows?: list<array<string, mixed>>} $payload */
         $payload = json_decode($request->getContent(), true) ?? [];
         $rows = is_array($payload['rows'] ?? null) ? $payload['rows'] : [];
+        if (count($rows) > self::MAX_RESOLVE_BATCH_ROWS) {
+            return $this->json([
+                'detail' => sprintf('Too many rows: maximum %d per request.', self::MAX_RESOLVE_BATCH_ROWS),
+            ], 400);
+        }
         $results = [];
 
         foreach ($rows as $row) {

@@ -253,7 +253,7 @@ export default function PlatformAdminPage() {
       <Card>
         <CardHeader
           title="Scryfall catalog sync"
-          subtitle="Downloads oracle_cards bulk data and upserts the global card catalog."
+          subtitle="Queues a bulk catalog sync on the background worker. Run the CLI app:scryfall:sync for the full all-printings dataset."
           actions={
             <Button
               variant="primary"
@@ -261,16 +261,22 @@ export default function PlatformAdminPage() {
               onClick={() => syncScryfall.mutate()}
             >
               <RefreshCw aria-hidden className="size-4" />
-              {syncScryfall.isPending ? 'Syncing…' : 'Run sync'}
+              {syncScryfall.isPending ? 'Queueing…' : 'Run sync'}
             </Button>
           }
         />
         {(syncScryfall.data || syncScryfall.isError) && (
           <CardBody>
-            {syncScryfall.data && (
+            {syncScryfall.data?.status === 'queued' && (
               <p className="text-sm text-success-700">
-                Synced {syncScryfall.data.total} cards ({syncScryfall.data.inserted} inserted,{' '}
-                {syncScryfall.data.updated} updated).
+                Sync queued ({syncScryfall.data.type ?? 'oracle_cards'}) — it runs on the messenger
+                worker in the background; progress appears in the worker logs.
+              </p>
+            )}
+            {syncScryfall.data && syncScryfall.data.status !== 'queued' && (
+              <p className="text-sm text-success-700">
+                Synced {syncScryfall.data.total ?? 0} cards ({syncScryfall.data.inserted ?? 0} inserted,{' '}
+                {syncScryfall.data.updated ?? 0} updated).
               </p>
             )}
             {syncScryfall.isError && (

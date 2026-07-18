@@ -82,6 +82,12 @@ final class ScryfallCardUpserter
             return ['inserted' => 0, 'updated' => 0, 'skipped' => $skipped];
         }
 
+        // Deterministic id order: concurrent multi-row upserts over an
+        // overlapping id set must acquire their row locks in the SAME order,
+        // or Postgres deadlocks (40P01) — e.g. the bulk sync racing an
+        // import worker's collection batch on popular cards.
+        ksort($rows, SORT_STRING);
+
         $columnCount = count(self::COLUMNS);
         $placeholderRow = '('.implode(', ', array_fill(0, $columnCount, '?')).')';
         $placeholders = implode(', ', array_fill(0, count($rows), $placeholderRow));

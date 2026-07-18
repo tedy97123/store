@@ -21,3 +21,12 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+    # Shared Scryfall throttle: the lock file lives in var/ (app-owned, shared
+    # by web + messenger processes on the host) rather than the system temp
+    # dir, where PrivateTmp systemd units would silently give each service its
+    # own file — reverting the "one global budget" guarantee — and where a
+    # predictable world-writable path invites tampering.
+    App\Service\Scryfall\ScryfallRateLimiter:
+        arguments:
+            $lockFilePath: '%kernel.project_dir%/var/scryfall_rate.lock'

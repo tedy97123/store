@@ -12,10 +12,13 @@ const MAX_PAGES = 400
 
 /**
  * useInventory — fetch a store's full inventory listing. The API serves the
- * collection in pages (bounded response size / server memory); this hook
- * walks the pages sequentially and aggregates them, so consumers still get
- * the complete array they always did. The cache is shared across the
- * storefront, card details, and admin search so it usually stays warm.
+ * collection in keyset pages (`?afterId=` cursor, bounded response size and
+ * O(page) server cost); this hook walks the cursor and aggregates, so
+ * consumers still get the complete array they always did. Keyset paging is
+ * immune to items shifting between pages when concurrent edits land
+ * mid-walk; results are deduped by id as a final defensive layer. The cache
+ * is shared across the storefront, card details, and admin search so it
+ * usually stays warm.
  */
 export function useInventory(slug: string) {
   return useQuery({
@@ -26,17 +29,26 @@ export function useInventory(slug: string) {
     // the cart reuses the cache instead of refetching the whole list each time.
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const items: InventoryItem[] = []
-      for (let page = 1; page <= MAX_PAGES; page++) {
+      const seen = new Map<number, InventoryItem>()
+      let afterId = 0
+      for (let page = 0; page < MAX_PAGES; page++) {
         const { data } = await api.get(`/stores/${slug}/inventory`, {
-          params: { page, itemsPerPage: PAGE_SIZE },
+          params: { afterId, itemsPerPage: PAGE_SIZE },
         })
         const chunk = unwrapCollection<InventoryItem>(data)
-        items.push(...chunk)
+        for (const item of chunk) {
+          seen.set(item.id, item)
+          if (item.id > afterId) afterId = item.id
+        }
         // A short (or empty) page means we've reached the end.
         if (chunk.length < PAGE_SIZE) break
       }
-      return items
+      // Keyset pages arrive in id order; restore the name ordering the old
+      // server response had (the storefront's default "featured" sort keeps
+      // fetch order, so this preserves its behavior).
+      return [...seen.values()].sort(
+        (a, b) => a.card.name.localeCompare(b.card.name) || a.id - b.id,
+      )
     },
   })
 }

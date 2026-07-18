@@ -12,14 +12,28 @@ use App\Repository\CsvImportRowRepository;
 use App\Service\Catalog\CatalogCardResolver;
 use App\Service\Inventory\StoreInventoryWriter;
 use App\Service\Scryfall\ScryfallClient;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\OptimisticLockException;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 #[AsMessageHandler]
 final readonly class ProcessCsvImportMessageHandler
 {
+    /**
+     * A PROCESSING row whose claim is older than this is considered
+     * abandoned (crashed handler) and safe to requeue. Rows with fresher
+     * claims belong to a live handler and must not be stolen — requeueing
+     * them lets a second worker import the same rows and double inventory.
+     */
+    private const STALE_CLAIM_SECONDS = 600;
+
+    /** Delay before re-checking a job whose rows are freshly claimed elsewhere. */
+    private const LIVENESS_RECHECK_DELAY_MS = 60_000;
+
     public function __construct(
         private CsvImportJobRepository $jobRepository,
         private CsvImportRowRepository $rowRepository,
@@ -52,10 +66,15 @@ final readonly class ProcessCsvImportMessageHandler
             return;
         }
 
+        $claimedRowIds = [];
+
         try {
-            $job->setStatus(CsvImportJob::STATUS_PROCESSING);
-            if (null === $job->getStartedAt()) {
-                $job->setStartedAt(new \DateTimeImmutable());
+            // Guarded transition: only QUEUED/PROCESSING may become PROCESSING.
+            // A pause/cancel committed between the entity load above and this
+            // statement wins — the blind setStatus+flush used before silently
+            // overwrote a concurrent PAUSED and the import kept running.
+            if (!$this->markJobProcessing($job)) {
+                return;
             }
             $this->syncCounters($job);
             $this->entityManager->flush();
@@ -67,6 +86,7 @@ final readonly class ProcessCsvImportMessageHandler
                 $this->completeJob($job);
                 return;
             }
+            $claimedRowIds = array_map(static fn (CsvImportRow $row): int => (int) $row->getId(), $rows);
 
             // Resolve the whole batch up front: local natural-key matches first,
             // then ONE Scryfall collection call (75 identifiers per request) for
@@ -130,9 +150,59 @@ final readonly class ProcessCsvImportMessageHandler
             }
 
             $this->flushBatchAndQueueNext($job, $pendingItemLinks);
+        } catch (UniqueConstraintViolationException|OptimisticLockException $e) {
+            // Two workers raced on the same inventory line (same store/card/
+            // condition/foil tuple in two batches) — the batch flush rolled
+            // back. The data conflict is transient: requeue OUR claimed rows
+            // and retry; the re-run will find the winner's row and merge.
+            $this->recoverContendedBatch($message->jobId, $claimedRowIds);
         } catch (\Throwable $e) {
             $this->markJobFailed($message->jobId, $e);
         }
+    }
+
+    /**
+     * Atomic QUEUED/PROCESSING → PROCESSING transition. Returns false when a
+     * concurrent pause/cancel/completion owns the job now.
+     */
+    private function markJobProcessing(CsvImportJob $job): bool
+    {
+        $affected = $this->entityManager->getConnection()->executeStatement(
+            'UPDATE csv_import_jobs SET status = :processing, started_at = COALESCE(started_at, NOW()) WHERE id = :id AND status IN (:queued, :processing)',
+            [
+                'processing' => CsvImportJob::STATUS_PROCESSING,
+                'id' => (int) $job->getId(),
+                'queued' => CsvImportJob::STATUS_QUEUED,
+            ],
+        );
+
+        $this->entityManager->refresh($job);
+
+        return $affected > 0;
+    }
+
+    /** @param list<int> $claimedRowIds */
+    private function recoverContendedBatch(int $jobId, array $claimedRowIds): void
+    {
+        $manager = $this->entityManager->isOpen()
+            ? $this->entityManager
+            : $this->managerRegistry->resetManager();
+
+        if ([] !== $claimedRowIds) {
+            $manager->getConnection()->executeStatement(
+                'UPDATE csv_import_rows SET status = :queued, claimed_at = NULL, error = NULL WHERE id IN (:ids) AND status = :processing',
+                [
+                    'queued' => CsvImportRow::STATUS_QUEUED,
+                    'ids' => $claimedRowIds,
+                    'processing' => CsvImportRow::STATUS_PROCESSING,
+                ],
+                [
+                    'ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                ],
+            );
+        }
+
+        $this->messageBus->dispatch(new ProcessCsvImportMessage($jobId));
     }
 
     /**
@@ -258,18 +328,33 @@ final readonly class ProcessCsvImportMessageHandler
 
     /**
      * Marks the job completed only when no rows remain queued or processing.
-     * Rows still stuck in PROCESSING (e.g. a crashed/abandoned handler) are
-     * requeued and processing continues instead of declaring a false completion.
+     *
+     * PROCESSING rows are only requeued when their claim is STALE (crashed/
+     * abandoned handler); rows freshly claimed by a live handler are left
+     * alone — that handler drives progress — and a delayed re-check message
+     * keeps the job live in case that handler dies mid-batch. Completion
+     * itself is a guarded PROCESSING → COMPLETED transition so it can never
+     * overwrite a concurrent pause/cancel.
      */
     private function completeJob(CsvImportJob $job): void
     {
         $counts = $this->rowRepository->countByStatus($job);
 
         if ($counts['processing'] > 0) {
-            $this->rowRepository->requeueProcessingRows($job);
+            $cutoff = new \DateTimeImmutable(sprintf('-%d seconds', self::STALE_CLAIM_SECONDS));
+            $requeued = $this->rowRepository->requeueProcessingRows($job, $cutoff);
             $this->syncCounters($job);
             $this->entityManager->flush();
-            $this->messageBus->dispatch(new ProcessCsvImportMessage((int) $job->getId()));
+
+            if ($requeued > 0) {
+                $this->messageBus->dispatch(new ProcessCsvImportMessage((int) $job->getId()));
+            } else {
+                $this->messageBus->dispatch(
+                    new ProcessCsvImportMessage((int) $job->getId()),
+                    [new DelayStamp(self::LIVENESS_RECHECK_DELAY_MS)],
+                );
+            }
+
             return;
         }
 
@@ -281,9 +366,18 @@ final readonly class ProcessCsvImportMessageHandler
         }
 
         $this->syncCounters($job);
-        $job->setStatus(CsvImportJob::STATUS_COMPLETED);
-        $job->setFinishedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
+
+        // Guarded completion: only a job still PROCESSING may become COMPLETED.
+        $this->entityManager->getConnection()->executeStatement(
+            'UPDATE csv_import_jobs SET status = :completed, finished_at = NOW() WHERE id = :id AND status = :processing',
+            [
+                'completed' => CsvImportJob::STATUS_COMPLETED,
+                'id' => (int) $job->getId(),
+                'processing' => CsvImportJob::STATUS_PROCESSING,
+            ],
+        );
+        $this->entityManager->refresh($job);
     }
 
     private function syncCounters(CsvImportJob $job): void
@@ -302,6 +396,11 @@ final readonly class ProcessCsvImportMessageHandler
 
         $job = $manager->getRepository(CsvImportJob::class)->find($jobId);
         if (!$job instanceof CsvImportJob) {
+            return;
+        }
+
+        // Never overwrite a terminal state a user/other worker already set.
+        if (in_array($job->getStatus(), [CsvImportJob::STATUS_COMPLETED, CsvImportJob::STATUS_CANCELLED], true)) {
             return;
         }
 

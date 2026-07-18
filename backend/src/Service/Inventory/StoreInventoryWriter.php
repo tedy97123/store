@@ -43,6 +43,93 @@ final readonly class StoreInventoryWriter
             }
         }
 
+        // Batch path (flush=false): apply into the shared unit of work and let
+        // the CSV handler flush + recover the whole batch on conflict (it owns
+        // the transaction boundary and requeues contended rows).
+        if (!$flush) {
+            return $this->applyWrite($store, $card, $quantity, $condition, $isFoil, $notes);
+        }
+
+        // Immediate path (flush=true, web add/edit/manual-import): a native
+        // atomic upsert on the unique line. Two concurrent adds to the same
+        // (store, card, condition, foil) tuple can neither 500 on the unique
+        // constraint (the old check-then-insert race) nor lose an increment
+        // (the old read-modify-write) — the quantity is summed in-database.
+        return $this->upsertLine($store, $card, $quantity, $condition, $isFoil, $notes);
+    }
+
+    /**
+     * Atomic find-or-increment for the immediate write path.
+     *
+     * INSERT ... ON CONFLICT sums the quantity in a single statement, so it is
+     * safe under concurrency without locks, an optimistic-lock retry loop, or
+     * the Entity-manager-closed fallout a check-then-insert flush would cause.
+     * The managed entity is then (re)loaded so callers get a hydrated
+     * InventoryItem for serialization.
+     */
+    private function upsertLine(
+        Store $store,
+        Card $card,
+        int $quantity,
+        CardCondition $condition,
+        bool $isFoil,
+        ?string $notes,
+    ): InventoryItem {
+        $priceCents = $this->resolvePriceCents($card, $isFoil);
+        $connection = $this->entityManager->getConnection();
+
+        $id = $connection->fetchOne(
+            <<<'SQL'
+            INSERT INTO inventory_items (store_id, card_id, quantity, price_cents, condition, is_foil, notes, version)
+            VALUES (:store, :card, :quantity, :price, :condition, :foil, :notes, 1)
+            ON CONFLICT (store_id, card_id, condition, is_foil)
+            DO UPDATE SET
+                quantity = inventory_items.quantity + EXCLUDED.quantity,
+                price_cents = EXCLUDED.price_cents,
+                notes = COALESCE(NULLIF(EXCLUDED.notes, ''), inventory_items.notes),
+                version = inventory_items.version + 1
+            RETURNING id
+            SQL,
+            [
+                'store' => $store->getId(),
+                'card' => $card->getId()->toRfc4122(),
+                'quantity' => $quantity,
+                'price' => $priceCents,
+                'condition' => $condition->value,
+                'foil' => $isFoil ? 'true' : 'false',
+                'notes' => null !== $notes && '' !== trim($notes) ? $notes : '',
+            ],
+            [
+                'store' => \Doctrine\DBAL\ParameterType::INTEGER,
+                'quantity' => \Doctrine\DBAL\ParameterType::INTEGER,
+                'price' => \Doctrine\DBAL\ParameterType::INTEGER,
+            ],
+        );
+
+        $item = $this->inventoryItemRepository->find((int) $id);
+        if (!$item instanceof InventoryItem) {
+            throw new \RuntimeException('Inventory upsert did not return a persisted row.');
+        }
+
+        // The row was written outside the ORM; refresh so a stale identity-map
+        // copy reflects the committed quantity/version.
+        $this->entityManager->refresh($item);
+
+        return $item;
+    }
+
+    /**
+     * Finds-or-creates the inventory line and folds in the quantity/price/notes.
+     * Does NOT flush — callers control the transaction boundary.
+     */
+    private function applyWrite(
+        Store $store,
+        Card $card,
+        int $quantity,
+        CardCondition $condition,
+        bool $isFoil,
+        ?string $notes,
+    ): InventoryItem {
         $item = $this->inventoryItemRepository->findOneBy([
             'store' => $store,
             'card' => $card,
@@ -69,10 +156,6 @@ final readonly class StoreInventoryWriter
 
         if (null !== $notes && '' !== trim($notes)) {
             $item->setNotes($notes);
-        }
-
-        if ($flush) {
-            $this->entityManager->flush();
         }
 
         return $item;

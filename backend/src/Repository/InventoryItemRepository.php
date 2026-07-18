@@ -49,6 +49,30 @@ class InventoryItemRepository extends ServiceEntityRepository
             ->getSingleScalarResult();
     }
 
+    /**
+     * Keyset (cursor) page: items with id > $afterId, ascending. Backed by
+     * idx_inventory_store_id_id, each page is an O(page-size) index range
+     * scan — unlike OFFSET pages, walking the whole inventory is linear, and
+     * because the cursor is an immutable id, concurrent inserts/deletes can
+     * never shift rows into (duplicate) or out of (skip) later pages.
+     *
+     * @return list<InventoryItem>
+     */
+    public function findByStoreAfterId(Store $store, int $afterId, int $limit): array
+    {
+        return $this->createQueryBuilder('i')
+            ->andWhere('i.store = :store')
+            ->andWhere('i.id > :afterId')
+            ->setParameter('store', $store)
+            ->setParameter('afterId', $afterId)
+            ->join('i.card', 'c')
+            ->addSelect('c')
+            ->orderBy('i.id', 'ASC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
     public function findOneByStoreAndId(Store $store, int $id): ?InventoryItem
     {
         return $this->createQueryBuilder('i')
