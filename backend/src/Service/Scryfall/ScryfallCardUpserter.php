@@ -210,8 +210,14 @@ final class ScryfallCardUpserter
         }
     }
 
+    /**
+     * Truncates to a column's character limit. Uses mb_* so a multibyte
+     * sequence is never sliced in half — a byte-wise substr() on a long
+     * unicode name yields invalid UTF-8 that PostgreSQL rejects outright
+     * (VARCHAR(n) counts characters, not bytes).
+     */
     private function truncate(string $value, int $maxLength): string
     {
-        return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
+        return mb_strlen($value) > $maxLength ? mb_substr($value, 0, $maxLength) : $value;
     }
 }

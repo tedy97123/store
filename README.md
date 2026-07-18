@@ -254,6 +254,38 @@ Super-admins can also trigger a sync via `POST /api/admin/scryfall/sync` (defaul
 
 ---
 
+## Testing & CI
+
+CI runs on every push and PR (`.github/workflows/ci.yml`): the backend job spins
+up PostgreSQL 16, migrates a test database, lints the DI container, and runs
+PHPUnit; the frontend job runs lint, typecheck, and build.
+
+**Backend (PHPUnit).** Tests use a dedicated `store_test` database (the test env
+appends a `_test` suffix to `DATABASE_URL`) and [`dama/doctrine-test-bundle`](https://github.com/dmaicher/doctrine-test-bundle)
+wraps each test in a transaction that rolls back, so the schema is migrated once
+and tests never pollute each other.
+
+```bash
+cd backend
+createdb -h 127.0.0.1 -U store store_test           # once
+APP_ENV=test php bin/console doctrine:migrations:migrate --no-interaction
+php bin/phpunit
+```
+
+Coverage focuses on the correctness- and concurrency-critical paths: the
+`ON CONFLICT` card upserter, natural-key catalog resolution, the inventory
+merge/optimistic-lock write path, CSV row claiming + stale-claim requeue, and
+inventory/order pagination.
+
+**Frontend.**
+
+```bash
+cd frontend
+npm run lint && npx tsc --noEmit && npm run build
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause / Fix |
