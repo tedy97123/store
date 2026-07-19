@@ -116,13 +116,13 @@ final class CatalogFixtures
         return $user;
     }
 
-    public function inventoryItem(Store $store, Card $card, int $quantity = 1, CardCondition $condition = CardCondition::NM, bool $isFoil = false): InventoryItem
+    public function inventoryItem(Store $store, Card $card, int $quantity = 1, CardCondition $condition = CardCondition::NM, bool $isFoil = false, int $priceCents = 100): InventoryItem
     {
         $item = new InventoryItem();
         $item->setStore($store);
         $item->setCard($card);
         $item->setQuantity($quantity);
-        $item->setPriceCents(100);
+        $item->setPriceCents($priceCents);
         $item->setCondition($condition);
         $item->setIsFoil($isFoil);
         $this->em->persist($item);

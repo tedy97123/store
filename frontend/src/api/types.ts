@@ -198,6 +198,35 @@ export interface InventoryItem {
   card: CardSummary
 }
 
+export type StoreSectionMode = 'manual' | 'auto'
+
+/** One inventory listing placed in a Case Cards section (public shape). */
+export interface StoreSectionCard {
+  id: number
+  position: number
+  inventoryItem: {
+    id: number
+    priceCents: number
+    quantity: number
+    condition: InventoryItem['condition']
+    isFoil: boolean
+    card: CardSummary | null
+  }
+}
+
+/** A "Case Cards" section on a store's public Case Cards page. */
+export interface StoreSection {
+  id: number
+  title: string
+  position: number
+  mode: StoreSectionMode
+  autoMinPriceCents: number | null
+  autoMaxPriceCents: number | null
+  autoRarity: string | null
+  createdAt: string
+  cards: StoreSectionCard[]
+}
+
 export interface StoreCustomer {
   // `id` is null when the current user has no saved profile for the store yet
   // (the GET endpoint returns an empty representation rather than persisting one).

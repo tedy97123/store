@@ -42,7 +42,7 @@ export type QuickAction = { label: string; icon: LucideIcon; path?: string; acti
 
 export const QUICK_ACTIONS: QuickAction[] = [
   { label: 'Search Cards', icon: Search, action: 'search' },
-  { label: 'Case cards', icon: GalleryHorizontalEnd },
+  { label: 'Case cards', icon: GalleryHorizontalEnd, path: 'case-cards' },
   { label: 'Mass Search', icon: ClipboardList, path: 'mass-search' },
   { label: 'Deck Builder', icon: Package },
   { label: 'Sell/Trade', icon: WalletCards },
