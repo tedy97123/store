@@ -1,7 +1,27 @@
 framework:
     messenger:
+        # Messages that exhaust their retries are moved here (dead-letter queue)
+        # instead of being discarded, so a persistently failing CSV import or
+        # catalog sync can be inspected and requeued rather than silently lost:
+        #   php bin/console messenger:failed:show
+        #   php bin/console messenger:failed:retry
+        failure_transport: failed
+
         transports:
-            async: '%env(MESSENGER_TRANSPORT_DSN)%'
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    # 3 attempts with exponential backoff (1s, 2s, 4s) before a
+                    # message is sent to the failure transport.
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+                    max_delay: 0
+
+            # Dead-letter store. Doctrine-backed so it survives restarts and is
+            # queryable; the table auto-creates on first use.
+            failed:
+                dsn: '%env(MESSENGER_FAILED_TRANSPORT_DSN)%'
 
         routing:
             App\Message\ProcessCsvImportMessage: async

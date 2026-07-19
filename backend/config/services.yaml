@@ -42,6 +42,13 @@ services:
         arguments:
             $importLogDir: '%kernel.logs_dir%/imports'
 
+    # Error tracking (off unless SENTRY_DSN is set — see App\Monitoring\ErrorReporter).
+    App\Monitoring\ErrorReporter:
+        arguments:
+            $dsn: '%env(SENTRY_DSN)%'
+            $environment: '%env(APP_ENV)%'
+            $release: '%env(SENTRY_RELEASE)%'
+
 when@test:
     services:
         # Replace the real Scryfall client with a network-free fake so the test

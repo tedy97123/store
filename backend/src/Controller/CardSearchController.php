@@ -3,11 +3,14 @@
 namespace App\Controller;
 
 use App\Repository\CardRepository;
+use App\Security\ApiRateLimit;
 use App\Service\Catalog\CatalogCardResolver;
 use App\Service\Scryfall\ScryfallClient;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -32,6 +35,8 @@ class CardSearchController extends AbstractController
         private readonly CardRepository $cardRepository,
         private readonly ScryfallClient $scryfallClient,
         private readonly CatalogCardResolver $catalogCardResolver,
+        #[Autowire(service: 'limiter.catalog_search')]
+        private readonly RateLimiterFactoryInterface $catalogSearchLimiter,
     ) {
     }
 
@@ -39,6 +44,10 @@ class CardSearchController extends AbstractController
     #[IsGranted('ROLE_USER')]
     public function search(Request $request): JsonResponse
     {
+        if (null !== $response = ApiRateLimit::enforce($this->catalogSearchLimiter, $this->rateLimitKey($request))) {
+            return $response;
+        }
+
         $query = trim((string) $request->query->get('q', ''));
         if ('' === $query) {
             return $this->json([]);
@@ -112,6 +121,17 @@ class CardSearchController extends AbstractController
             $this->catalogCardResolver->serializeCard(...),
             array_slice(array_values($merged), 0, 40),
         ));
+    }
+
+    /**
+     * Rate-limit bucket key: the authenticated user id (the endpoint requires
+     * ROLE_USER), falling back to client IP defensively.
+     */
+    private function rateLimitKey(Request $request): string
+    {
+        $user = $this->getUser();
+
+        return null !== $user ? 'user:'.$user->getUserIdentifier() : 'ip:'.$request->getClientIp();
     }
 
     #[Route('/resolve-batch', name: 'api_catalog_resolve_batch', methods: ['POST'])]

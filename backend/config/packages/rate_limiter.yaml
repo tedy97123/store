@@ -1,0 +1,24 @@
+framework:
+    rate_limiter:
+        # Per-authenticated-user ceiling on the interactive catalog search
+        # endpoint (/api/catalog/search).
+        #
+        # IMPORTANT: this does NOT touch CSV imports. The import worker resolves
+        # cards in-process via CatalogCardResolver and its Scryfall usage is
+        # governed separately by ScryfallRateLimiter — it never calls this HTTP
+        # endpoint. Only human search UI (admin search, failed-row resolve,
+        # customer want-list) hits this. The limit is set high enough that even
+        # rapid manual resolving stays well under it; it exists purely to stop a
+        # single account from scripting thousands of searches (scraping / DoS).
+        catalog_search:
+            policy: 'sliding_window'
+            limit: 300
+            interval: '1 minute'
+
+        # CSV uploads are heavy (parse + queue up to 50k rows). Keep a single
+        # store from flooding the import pipeline. Does not affect processing
+        # speed of an already-accepted import — only how often new uploads start.
+        csv_upload:
+            policy: 'sliding_window'
+            limit: 20
+            interval: '1 minute'
