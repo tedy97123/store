@@ -6,6 +6,45 @@ import { Button, Input } from '../components/ui'
 import AuthMarketingAside from '../components/AuthMarketingAside'
 import { SsoOption, useSsoStatus } from '../components/SsoOption'
 import { useAuth } from '../context/AuthContext'
+import type { UserProfile } from '../api/types'
+
+/**
+ * Where to send a user right after login. Honors the pre-login `from` path only
+ * when the freshly authenticated user is actually allowed there; otherwise it
+ * routes to a role-appropriate landing. This stops a logout → login as another
+ * account from dropping the new user onto the previous user's store admin.
+ */
+function safeDestination(from: string, user: UserProfile | null): string {
+  const roleHome = defaultHome(user)
+  if (!user) return from
+
+  const isSuperAdmin = user.roles.includes('ROLE_SUPER_ADMIN')
+
+  // Platform admin routes: super-admins only.
+  if (from.startsWith('/platform')) {
+    return isSuperAdmin ? from : roleHome
+  }
+
+  // Store admin routes (/s/{slug}/admin…): the user must own that store
+  // (super-admins may go anywhere).
+  const adminMatch = from.match(/^\/s\/([^/]+)\/admin/)
+  if (adminMatch) {
+    const slug = adminMatch[1]
+    const ownsStore = user.ownedStores.some((store) => store.slug === slug)
+    return isSuperAdmin || ownsStore ? from : roleHome
+  }
+
+  // Public / customer routes are fine for anyone.
+  return from
+}
+
+/** Role-appropriate landing when `from` isn't reachable for this user. */
+function defaultHome(user: UserProfile | null): string {
+  if (!user) return '/'
+  if (user.roles.includes('ROLE_SUPER_ADMIN')) return '/platform/admin'
+  if (user.ownedStores.length > 0) return `/s/${user.ownedStores[0].slug}/admin`
+  return '/'
+}
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -29,8 +68,11 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
-      navigate(from)
+      const loggedInUser = await login(email, password)
+      // Only honor the pre-login destination if this user can actually reach it;
+      // otherwise a logout→login as a different account would land on the
+      // previous user's store admin. Fall back to a role-appropriate home.
+      navigate(safeDestination(from, loggedInUser))
     } catch {
       setError('Invalid email or password.')
     } finally {
