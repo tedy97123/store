@@ -52,28 +52,59 @@ class CardSearchController extends AbstractController
             $finish = '';
         }
 
-        $local = array_filter(
-            $this->cardRepository->searchByName($query, 60),
-            fn (\App\Entity\Card $card): bool => $this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish),
-        );
-
-        // Local-first: only fall back to Scryfall (a rate-limited remote call
-        // plus catalog writes) when the local catalog comes up thin. As the
-        // card table fills in from bulk syncs and past imports, the remote
-        // leg — and its per-keystroke API/write load — disappears.
-        $remote = [];
-        if (count($local) < self::REMOTE_FALLBACK_THRESHOLD) {
-            $remote = $this->scryfallClient->searchRemoteAndUpsert(
-                $query,
-                40,
-                '' !== $setCode ? $setCode : null,
-                '' !== $finish ? $finish : null,
-            );
-        }
+        /** @var array<string, \App\Entity\Card> $merged */
         $merged = [];
-        foreach (array_merge($local, $remote) as $card) {
+
+        // 1. Name-based local matches (honoring all filters).
+        foreach ($this->cardRepository->searchByName($query, 60) as $card) {
             if ($this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish)) {
                 $merged[(string) $card->getId()] = $card;
+            }
+        }
+
+        // 2. Natural-key (set + collector number) resolution — the DEFINITIVE
+        //    lookup. A printing is uniquely identified by set + collector, so
+        //    this finds the exact card even when the query name is messy
+        //    ("Sol Ring (Retro Frame)", typos, foreign text) and name search
+        //    misses it. This is the same path the CSV failed-row recovery uses,
+        //    which is why retry finds cards that plain search could not. The
+        //    name query is intentionally NOT applied here, and rarity/finish are
+        //    left to the caller to pick, since set + collector already pin the
+        //    printing.
+        if ('' !== $setCode && '' !== $collectorNumber) {
+            $exact = $this->cardRepository->findByNaturalKey($setCode, $collectorNumber);
+            if ([] === $exact) {
+                try {
+                    $exact = array_values($this->scryfallClient->fetchCollectionBySetCollectors([
+                        ['set' => $setCode, 'collectorNumber' => $collectorNumber],
+                    ]));
+                } catch (\Throwable) {
+                    $exact = [];
+                }
+            }
+            foreach ($exact as $card) {
+                $merged[(string) $card->getId()] = $card;
+            }
+        }
+
+        // 3. Remote name search fallback when local results are still thin.
+        //    Wrapped so a Scryfall outage degrades to local-only results
+        //    instead of failing the whole request with a 500.
+        if (count($merged) < self::REMOTE_FALLBACK_THRESHOLD) {
+            try {
+                $remote = $this->scryfallClient->searchRemoteAndUpsert(
+                    $query,
+                    40,
+                    '' !== $setCode ? $setCode : null,
+                    '' !== $finish ? $finish : null,
+                );
+                foreach ($remote as $card) {
+                    if ($this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish)) {
+                        $merged[(string) $card->getId()] = $card;
+                    }
+                }
+            } catch (\Throwable) {
+                // Remote catalog is best-effort; local results already stand.
             }
         }
 

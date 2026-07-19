@@ -40,6 +40,7 @@ final readonly class ProcessCsvImportMessageHandler
         private CatalogCardResolver $catalogCardResolver,
         private ScryfallClient $scryfallClient,
         private StoreInventoryWriter $inventoryWriter,
+        private \App\Service\Import\ImportLogger $importLogger,
         private EntityManagerInterface $entityManager,
         private ManagerRegistry $managerRegistry,
         private MessageBusInterface $messageBus,
@@ -87,6 +88,9 @@ final readonly class ProcessCsvImportMessageHandler
                 return;
             }
             $claimedRowIds = array_map(static fn (CsvImportRow $row): int => (int) $row->getId(), $rows);
+            $this->importLogger->log($job, 'batch_claimed', ['rows' => count($rows)]);
+            $imported = 0;
+            $failed = 0;
 
             // Resolve the whole batch up front: local natural-key matches first,
             // then ONE Scryfall collection call (75 identifiers per request) for
@@ -115,6 +119,14 @@ final readonly class ProcessCsvImportMessageHandler
                     if (!$resolution->isResolved() || !$resolution->card instanceof Card) {
                         $row->setStatus(CsvImportRow::STATUS_ERROR);
                         $row->setError($resolution->error ?? 'No matching MTGJSON or Scryfall printing found.');
+                        ++$failed;
+                        $this->importLogger->log($job, 'row_failed', [
+                            'rowIndex' => $row->getRowIndex(),
+                            'name' => $row->getName(),
+                            'set' => $row->getSetCode(),
+                            'collectorNumber' => $row->getCollectorNumber(),
+                            'error' => $row->getError(),
+                        ], 'warning');
                         continue;
                     }
 
@@ -142,6 +154,7 @@ final readonly class ProcessCsvImportMessageHandler
                 $row->setStatus(CsvImportRow::STATUS_IMPORTED);
                 $row->setCard($this->serializeImportCard($card));
                 $row->setImportedItemId($item->getId());
+                ++$imported;
                 if (null === $item->getId()) {
                     // Freshly created items have no id until the batch flush;
                     // link them afterwards so the row always references its item.
@@ -149,14 +162,17 @@ final readonly class ProcessCsvImportMessageHandler
                 }
             }
 
+            $this->importLogger->log($job, 'batch_processed', ['imported' => $imported, 'failed' => $failed]);
             $this->flushBatchAndQueueNext($job, $pendingItemLinks);
         } catch (UniqueConstraintViolationException|OptimisticLockException $e) {
             // Two workers raced on the same inventory line (same store/card/
             // condition/foil tuple in two batches) — the batch flush rolled
             // back. The data conflict is transient: requeue OUR claimed rows
             // and retry; the re-run will find the winner's row and merge.
+            $this->importLogger->log($job, 'batch_contended_retry', ['rows' => count($claimedRowIds)], 'warning');
             $this->recoverContendedBatch($message->jobId, $claimedRowIds);
         } catch (\Throwable $e) {
+            $this->importLogger->log($job, 'batch_error', ['error' => $e->getMessage()], 'error');
             $this->markJobFailed($message->jobId, $e);
         }
     }
@@ -378,6 +394,14 @@ final readonly class ProcessCsvImportMessageHandler
             ],
         );
         $this->entityManager->refresh($job);
+
+        if (CsvImportJob::STATUS_COMPLETED === $job->getStatus()) {
+            $this->importLogger->log($job, 'completed', [
+                'imported' => $job->getImportedRows(),
+                'failed' => $job->getFailedRows(),
+                'total' => $job->getTotalRows(),
+            ]);
+        }
     }
 
     private function syncCounters(CsvImportJob $job): void
@@ -408,6 +432,8 @@ final readonly class ProcessCsvImportMessageHandler
         $job->setErrorMessage($this->formatFailureMessage($e));
         $job->setFinishedAt(new \DateTimeImmutable());
         $manager->flush();
+
+        $this->importLogger->log($job, 'failed', ['error' => $this->formatFailureMessage($e)], 'error');
     }
 
     private function formatFailureMessage(\Throwable $e): string

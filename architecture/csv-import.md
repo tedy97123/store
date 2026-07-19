@@ -173,6 +173,14 @@ flowchart LR
 
 The detail page renders two windows: imported rows (paginated) and failed rows. It also exposes pause/resume/retry/cancel controls, per-row Resolve actions, and the batch Retry failed cards review modal. Polling switches off automatically once the job reaches a terminal state (`completed/failed/cancelled/paused`).
 
+### Manual resolve search
+
+The per-row **Resolve** action searches the catalog (`GET /api/catalog/search`) with the row's name **and** its set + collector number. The search resolves by the **natural key (set + collector)** as well as by name, so a printing is found even when the CSV name is decorated or misspelled (`"Sol Ring (Retro Frame)"`). This mirrors what the batch *Retry failed cards* flow does — previously the per-row search matched by name only and could return an empty result for a card the batch retry would find.
+
+### Per-import logging
+
+Each import run writes a dedicated JSONL log at `var/log/imports/import-<jobId>.log` (`Service/Import/ImportLogger`), capturing its full timeline — `batch_claimed`, `batch_processed`, `row_failed`, `completed`/`failed`, and the recovery actions (`retry_failed_requested`, `row_manually_resolved`, `batch_manually_resolved`). Events are also mirrored to the main application log tagged with the job id, so a single run can be traced either in its own file or in centralized logging. Writes are best-effort and never fail an import.
+
 ---
 
 ## Where to go
