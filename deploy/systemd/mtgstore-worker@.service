@@ -1,0 +1,39 @@
+# systemd template unit for the Symfony Messenger worker (CSV import + catalog
+# sync). Start N workers with:  systemctl enable --now mtgstore-worker@1 mtgstore-worker@2
+#
+# Long-lived PHP workers accumulate memory, so each is bounded by --time-limit
+# and --memory-limit and exits cleanly; systemd restarts it. --limit is omitted
+# so the worker keeps consuming until a limit is hit.
+#
+# Install: copy to /etc/systemd/system/, edit User/WorkingDirectory/Environment,
+# then `systemctl daemon-reload`.
+
+[Unit]
+Description=MTG Store messenger worker %i
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mtgstore/backend
+# Secrets are injected via the environment file (NOT the committed .env).
+EnvironmentFile=/etc/mtgstore/worker.env
+Environment=APP_ENV=prod
+
+# Restart the worker every hour or 256 MB, whichever comes first, to bound
+# memory growth. --failure-limit stops a worker that hits repeated failures.
+ExecStart=/usr/bin/php bin/console messenger:consume async failed \
+    --time-limit=3600 \
+    --memory-limit=256M \
+    --failure-limit=10 \
+    -v
+
+Restart=always
+RestartSec=5
+# Give an in-flight batch time to finish on stop/restart.
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

@@ -55,6 +55,8 @@ final class StoreCsvImportController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly MessageBusInterface $messageBus,
         private readonly \App\Service\Import\ImportLogger $importLogger,
+        #[\Symfony\Component\DependencyInjection\Attribute\Autowire(service: 'limiter.csv_upload')]
+        private readonly \Symfony\Component\RateLimiter\RateLimiterFactoryInterface $csvUploadLimiter,
     ) {
     }
 
@@ -68,6 +70,17 @@ final class StoreCsvImportController extends AbstractController
         }
 
         $this->denyAccessUnlessGranted('STORE_MANAGE', $store);
+
+        // Throttle how often a store can START new imports (heavy: parse + queue
+        // up to 50k rows). Does not affect the processing speed of an accepted
+        // import — that runs in the worker.
+        if (null !== $response = ApiRateLimit::enforce(
+            $this->csvUploadLimiter,
+            'store:'.$store->getId(),
+            'Too many import uploads. Please wait a moment before uploading again.',
+        )) {
+            return $response;
+        }
 
         $file = $request->files->get('file');
         if (!$file instanceof UploadedFile) {

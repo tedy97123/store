@@ -341,6 +341,23 @@ Run migrations against the production database as a release step
 (`php bin/console doctrine:migrations:migrate --no-interaction`), and sync the
 catalog via the worker (`php bin/console app:scryfall:sync`).
 
+The frontend has its own production image (`frontend/Dockerfile`): a Node build
+served by nginx with SPA fallback, long-cached fingerprinted assets, and an
+`/api` proxy to the backend.
+
+> **Full deploy, worker supervision, backups/DR, log rotation, and monitoring
+> are documented in [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md)**, with reference
+> systemd/supervisor units and a `deploy/docker-compose.prod.yml` composition.
+
+### Workers
+
+CSV imports and catalog syncs run on Symfony Messenger workers — **if none is
+running, uploads queue forever.** Supervise them (systemd/supervisor/compose —
+see the runbook) so crashes auto-restart and memory growth is bounded
+(`--time-limit`/`--memory-limit`). Messages that exhaust their retries land in a
+`failed` dead-letter transport (`messenger:failed:show|retry`) rather than being
+lost.
+
 ### Health probes
 
 Two unauthenticated endpoints (outside the `/api` JWT firewall) for load
@@ -358,14 +375,22 @@ The Docker image's `HEALTHCHECK` hits `/health`.
 - **Login brute-force protection:** the `login` firewall throttles failed
   logins (5 per IP+username per 15 min) and returns **`429 Too Many Requests`**
   once exceeded. Tune `max_attempts`/`interval` in `config/packages/security.yaml`.
+- **API rate limiting:** catalog search and CSV upload are per-client rate
+  limited (`config/packages/rate_limiter.yaml`) — generous ceilings that only
+  trip on abuse, and never touch background import processing.
 - **Request correlation:** every response carries an `X-Request-Id` (an inbound
   one from a proxy/gateway is honored, otherwise generated). Unhandled
   exceptions are logged with structured context (`request_id`, method, path,
   status) so a single request can be traced across logs.
+- **Error tracking:** set `SENTRY_DSN` to capture 5xx and terminal worker
+  failures (off by default; uses the raw Sentry SDK). Correlate via the
+  `X-Request-Id` header.
 - **Logs:** the app logs to `stderr` (12-factor) — in the container image these
   are captured by your orchestrator's log driver. (`symfony/monolog-bundle`
   isn't yet Symfony 8.1 compatible; wire it in for JSON handlers/routing once it
   is.)
+- **CI security:** dependency audits (`composer audit`, `npm audit`) and secret
+  scanning (gitleaks) run in CI as a required check.
 
 ---
 

@@ -1,0 +1,20 @@
+# gitleaks configuration.
+#
+# Extends the default ruleset and allowlists the committed development-only
+# defaults in backend/.env (documented under its SECURITY NOTICE: these are
+# throwaway dev values; real production secrets are injected as environment
+# variables and never committed). The scan still covers the rest of the tree,
+# so a genuine secret committed anywhere else is caught.
+
+title = "store gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Development-only committed defaults"
+paths = [
+  '''backend/\.env$''',
+  # JWT keypair is gitignored; ignore any stray pem defensively.
+  '''.*\.pem$''',
+]

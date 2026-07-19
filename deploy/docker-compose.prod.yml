@@ -1,0 +1,66 @@
+# Reference production composition. NOT a turnkey deploy — review, set real
+# secrets via an env file / secrets manager, and put a TLS-terminating reverse
+# proxy (or managed LB) in front of the frontend. Secrets must NOT be committed;
+# `env_file` below points at an uncommitted file you create on the host.
+#
+#   docker compose -f deploy/docker-compose.prod.yml --env-file /etc/mtgstore/prod.env up -d
+#
+# Run migrations once per release (see deploy/RUNBOOK.md):
+#   docker compose -f deploy/docker-compose.prod.yml run --rm backend \
+#     php bin/console doctrine:migrations:migrate --no-interaction
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-store}
+      POSTGRES_USER: ${POSTGRES_USER:-store}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-store}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../backend
+    env_file: [/etc/mtgstore/prod.env]   # APP_SECRET, JWT_PASSPHRASE, DATABASE_URL, …
+    environment:
+      APP_ENV: prod
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Messenger worker. Same image as backend, different command. `restart` +
+  # the --time-limit/--memory-limit flags give the supervision the systemd/
+  # supervisor configs provide when not using compose.
+  worker:
+    build:
+      context: ../backend
+    command: php bin/console messenger:consume async failed --time-limit=3600 --memory-limit=256M --failure-limit=10 -v
+    env_file: [/etc/mtgstore/prod.env]
+    environment:
+      APP_ENV: prod
+    depends_on:
+      db:
+        condition: service_healthy
+    # Run two workers; scale with `docker compose up --scale worker=N`.
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    depends_on: [backend]
+    ports:
+      - "8080:8080"   # front this with a TLS-terminating proxy / managed LB
+    restart: unless-stopped
+
+volumes:
+  db_data:
