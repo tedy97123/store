@@ -22,6 +22,12 @@ services:
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
+    # Return HTTP 429 for login-throttling failures; delegate all other auth
+    # failures to Lexik's JWT handler (see App\Security\AuthenticationFailureHandler).
+    App\Security\AuthenticationFailureHandler:
+        arguments:
+            $decorated: '@lexik_jwt_authentication.handler.authentication_failure'
+
     # Shared Scryfall throttle: the lock file lives in var/ (app-owned, shared
     # by web + messenger processes on the host) rather than the system temp
     # dir, where PrivateTmp systemd units would silently give each service its
