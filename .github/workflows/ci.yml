@@ -132,9 +132,10 @@ jobs:
           tools: composer:v2
 
       # Fails on any known advisory against the committed composer.lock.
+      # --locked audits the lock file directly (no composer install needed).
       - name: Composer audit
         working-directory: backend
-        run: composer audit --no-interaction
+        run: composer audit --locked --no-interaction
 
       - name: Set up Node
         uses: actions/setup-node@v4
