@@ -17,8 +17,14 @@ class CustomerNotificationRepository extends ServiceEntityRepository
         parent::__construct($registry, CustomerNotification::class);
     }
 
-    /** @return list<CustomerNotification> */
-    public function findForUserAndStore(User $user, Store $store): array
+    /**
+     * Most recent notifications for the bell dropdown. Bounded — notifications
+     * accrete forever, and the bell only ever shows recent activity; an
+     * unbounded fetch grew monotonically with customer lifetime.
+     *
+     * @return list<CustomerNotification>
+     */
+    public function findForUserAndStore(User $user, Store $store, int $limit = 100): array
     {
         return $this->createQueryBuilder('notification')
             ->leftJoin('notification.relatedOrder', 'relatedOrder')
@@ -28,6 +34,7 @@ class CustomerNotificationRepository extends ServiceEntityRepository
             ->setParameter('user', $user)
             ->setParameter('store', $store)
             ->orderBy('notification.createdAt', 'DESC')
+            ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
     }

@@ -16,13 +16,43 @@ class CardRepository extends ServiceEntityRepository
         parent::__construct($registry, Card::class);
     }
 
-    /** @return list<Card> */
+    /**
+     * Substring name search. Backed by the trigram GIN index on LOWER(name)
+     * (see migration Version20260718090000) so the leading-% LIKE no longer
+     * forces a sequential scan of the whole catalog.
+     *
+     * @return list<Card>
+     */
     public function searchByName(string $query, int $limit = 20): array
     {
         return $this->createQueryBuilder('c')
             ->andWhere('LOWER(c.name) LIKE :query')
             ->setParameter('query', '%'.strtolower($query).'%')
             ->orderBy('c.name', 'ASC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Printing lookup by natural key. A printing is uniquely identified by
+     * set code + collector number, and every import row carries both — this
+     * is the primary (indexed, exact) match path for imports; name search is
+     * only the fallback. Backed by the expression index on
+     * (LOWER(set_code), LOWER(collector_number)).
+     *
+     * Returns a list because multiple language rows can share a set/collector
+     * pair; callers pick with their own filters.
+     *
+     * @return list<Card>
+     */
+    public function findByNaturalKey(string $setCode, string $collectorNumber, int $limit = 10): array
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('LOWER(c.setCode) = :setCode')
+            ->andWhere('LOWER(c.collectorNumber) = :collectorNumber')
+            ->setParameter('setCode', strtolower(trim($setCode)))
+            ->setParameter('collectorNumber', strtolower(trim($collectorNumber)))
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();

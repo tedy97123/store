@@ -51,16 +51,24 @@ sequenceDiagram
         Bus->>W: ProcessCsvImportMessage(jobId)
         W->>DB: job.status = processing, startedAt
         W->>DB: claimNextQueued(job, 25): SELECT FOR UPDATE SKIP LOCKED, mark 25 processing
+        Note over W,SC: batch pre-resolution (preResolveRows)
+        W->>R: matchLocal() per row — indexed natural-key lookup
+        W->>SC: ONE fetchCollectionBySetCollectors() for local misses<br/>(75 identifiers per request)
         loop each of the 25 rows
-            W->>R: resolve(name, set, collector#, rarity, finish)
-            alt card resolved
+            alt pre-resolved (local or collection batch)
                 W->>IW: write(store, card, qty, cond, foil) [flush=false]
                 W->>DB: row.status = imported, importedItemId
-            else not found
-                W->>DB: row.status = error, error msg
+            else fallback: R.resolve() (search → MTGJSON)
+                alt card resolved
+                    W->>IW: write(store, card, qty, cond, foil) [flush=false]
+                    W->>DB: row.status = imported, importedItemId
+                else not found
+                    W->>DB: row.status = error, error msg
+                end
             end
         end
         W->>DB: flush batch (inventory_items + rows + job counters)
+        W->>DB: backfill importedItemId for newly created items
         alt more queued rows
             W->>Bus: dispatch next ProcessCsvImportMessage
         else
@@ -69,22 +77,33 @@ sequenceDiagram
     end
 ```
 
+**Batch resolution economics**: once the catalog holds every printing (`default_cards` sync), a batch resolves entirely from the indexed local natural-key lookups — zero API calls. Cold-catalog imports cost at most `ceil(misses / 75)` collection requests per batch instead of one rate-limited search per row (a ~75× reduction). Rows the collection endpoint can't place fall back to the full per-row cascade so error messages stay specific.
+
 ---
 
 ## Why batched + self-dispatching?
 
 Rather than one long-running handler, each message processes **25 rows** then enqueues the next batch. This gives:
 
-- **Exactly-once rows** - `CsvImportRowRepository::claimNextQueued()` wraps a `SELECT ... FOR UPDATE SKIP LOCKED` plus `UPDATE ... status='processing'` in a transaction, so concurrent workers never grab the same rows and a crash mid-batch does not double-import.
+- **Exactly-once rows** - `CsvImportRowRepository::claimNextQueued()` wraps a `SELECT ... FOR UPDATE SKIP LOCKED` plus `UPDATE ... status='processing', claimed_at=NOW()` in a transaction, so concurrent workers never grab the same rows and a crash mid-batch does not double-import.
 - **Bounded memory / flushes** - inventory writes use `flush=false` and are flushed once per batch, not per row.
 - **Progress visibility** - job counters (`processed/imported/failed_rows`) are recomputed and flushed each batch, so polling shows steady movement.
+
+### Concurrency hardening
+
+Multiple workers can process one job in parallel (the SKIP-LOCKED claim is built for it), and users can pause/resume/retry mid-run. Several races are closed explicitly:
+
+- **Live vs. abandoned rows.** `claimNextQueued` stamps `claimed_at`. When a worker finds zero queued rows but some still `processing`, `completeJob` only requeues rows whose claim is older than `STALE_CLAIM_SECONDS` (crashed handler) — a live handler's freshly claimed rows are left alone, and a delayed re-check message keeps the job alive in case that handler dies. Requeueing live rows was a double-import: a second worker would re-import them while the first was still writing.
+- **Guarded state transitions.** `queued/processing → processing` (batch start) and `processing → completed` are conditional `UPDATE ... WHERE status IN (...)` statements, so a pause/cancel committed by the controller in the same window is never silently overwritten by a blind `setStatus()+flush()`.
+- **Contended inventory lines.** If two batches touch the same `(store, card, condition, is_foil)` tuple, the losing batch flush throws a unique-violation / optimistic-lock error; the handler catches it, requeues *its* claimed rows, and re-dispatches — the re-run finds the winner's row and merges instead of failing the whole job.
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued: upload
     queued --> processing: worker claims rows
-    processing --> completed: no rows left
-    processing --> failed: unhandled exception
+    processing --> completed: no rows left (guarded transition)
+    processing --> failed: unhandled exception (never over completed/cancelled)
+    processing --> processing: contended batch requeued + retried
     processing --> paused: POST /pause
     paused --> queued: POST /resume (requeue)
     failed --> queued: POST /retry

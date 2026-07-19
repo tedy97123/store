@@ -57,6 +57,15 @@ class CsvImportRow
     #[ORM\Column(length: 32)]
     private string $status = self::STATUS_QUEUED;
 
+    /**
+     * When a worker claimed this row (set by claimNextQueued, cleared on
+     * requeue). Lets completion logic tell a crashed handler's abandoned
+     * rows (stale claim → requeue) apart from a live handler's in-flight
+     * rows (fresh claim → leave alone).
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $claimedAt = null;
+
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $card = null;
 
@@ -97,4 +106,6 @@ class CsvImportRow
     public function setError(?string $error): static { $this->error = $error; return $this; }
     public function getImportedItemId(): ?int { return $this->importedItemId; }
     public function setImportedItemId(?int $importedItemId): static { $this->importedItemId = $importedItemId; return $this; }
+    public function getClaimedAt(): ?\DateTimeImmutable { return $this->claimedAt; }
+    public function setClaimedAt(?\DateTimeImmutable $claimedAt): static { $this->claimedAt = $claimedAt; return $this; }
 }

@@ -230,10 +230,15 @@ Full API docs: **http://127.0.0.1:8000/api/docs**
 ## Scryfall sync
 
 ```bash
-php bin/console app:scryfall:sync
+php bin/console app:scryfall:sync                      # default_cards — every printing (recommended)
+php bin/console app:scryfall:sync --type=oracle_cards  # one printing per card name (smaller/faster)
 ```
 
-Downloads the Scryfall `oracle_cards` bulk file (~169 MB) and upserts the local catalog in batches. Also available to super-admins via `POST /api/admin/scryfall/sync`.
+Streams the chosen Scryfall bulk file to disk, parses it incrementally, and upserts the local catalog with multi-row `ON CONFLICT` batches — memory stays flat even for the multi-hundred-MB `default_cards` file.
+
+**`default_cards` is what makes the catalog self-sufficient**: store CSV imports identify a printing by set + collector number, and only the all-printings dataset can resolve those locally (indexed natural-key lookup) without falling back to the Scryfall API. Schedule it via cron to keep prices fresh.
+
+Super-admins can also trigger a sync via `POST /api/admin/scryfall/sync` (defaults to the smaller `oracle_cards` so the synchronous request stays within HTTP timeouts; accepts `{"type": "default_cards"}`).
 
 ---
 
@@ -246,6 +251,107 @@ Downloads the Scryfall `oracle_cards` bulk file (~169 MB) and upserts the local 
 | API docs (Swagger) | http://127.0.0.1:8000/api/docs |
 | Mailpit (email UI) | http://localhost:8025 |
 | PostgreSQL | 127.0.0.1:5432 |
+
+---
+
+## Testing & CI
+
+CI runs on every push and PR (`.github/workflows/ci.yml`): the backend job spins
+up PostgreSQL 16, migrates a test database, lints the DI container, and runs
+PHPUnit; the frontend job runs lint, typecheck, and build.
+
+**Backend (PHPUnit).** Tests use a dedicated `store_test` database (the test env
+appends a `_test` suffix to `DATABASE_URL`) and [`dama/doctrine-test-bundle`](https://github.com/dmaicher/doctrine-test-bundle)
+wraps each test in a transaction that rolls back, so the schema is migrated once
+and tests never pollute each other.
+
+```bash
+cd backend
+createdb -h 127.0.0.1 -U store store_test           # once
+APP_ENV=test php bin/console doctrine:migrations:migrate --no-interaction
+php bin/phpunit
+```
+
+Coverage focuses on the correctness- and concurrency-critical paths: the
+`ON CONFLICT` card upserter, natural-key catalog resolution, the inventory
+merge/optimistic-lock write path, CSV row claiming + stale-claim requeue, and
+inventory/order pagination.
+
+**Frontend.**
+
+```bash
+cd frontend
+npm run lint && npx tsc --noEmit && npm run build
+```
+
+### Requiring green CI before merge (branch protection)
+
+CI already runs on every pull request. To make it a **merge gate**, a repository
+admin enables branch protection once (GitHub → *Settings → Branches → Add branch
+ruleset*, or *Branches → Add rule* for `master`):
+
+- **Require status checks to pass before merging** → add the **`CI success`**
+  check. That single job aggregates the backend and frontend jobs (it only
+  passes when both do), so you require one check and new jobs are covered
+  automatically as they're added to its `needs` list.
+- Recommended alongside: *Require a pull request before merging* and *Require
+  branches to be up to date before merging*.
+
+Until protection is enabled, CI still reports pass/fail on each PR — it just
+isn't enforced.
+
+---
+
+## Production configuration
+
+**Secrets are never read from the committed `.env` in production.** The values in
+`backend/.env` are development-only defaults; override every secret with real
+environment variables injected by your platform or secrets manager:
+
+| Variable | Notes |
+|----------|-------|
+| `APP_ENV` | Set to `prod`. |
+| `APP_SECRET` | Fresh random value (e.g. `openssl rand -hex 16`). |
+| `DATABASE_URL` | Production PostgreSQL DSN. |
+| `JWT_PASSPHRASE` | Passphrase for the JWT keypair; generate the keypair in the target environment (`bin/console lexik:jwt:generate-keypair`) — the `.pem` files are gitignored and never shipped. |
+| `CORS_ALLOW_ORIGIN` | Regex for your real frontend origin(s). |
+| `MAILER_DSN` | Production SMTP. |
+
+The `.pem` keys and `.env.local` are excluded from the Docker build context
+(`backend/.dockerignore`), so secrets can't be baked into an image.
+
+### Container image
+
+`backend/Dockerfile` is a multi-stage production build (Composer `--no-dev` +
+optimized autoloader → [FrankenPHP](https://frankenphp.dev) runtime with OPcache
+and `opcache.validate_timestamps=0`):
+
+```bash
+cd backend
+docker build -t mtg-store-backend .
+docker run -p 8000:8000 \
+  -e APP_ENV=prod \
+  -e APP_SECRET="$(openssl rand -hex 16)" \
+  -e DATABASE_URL="postgresql://user:pass@db-host:5432/store?serverVersion=16" \
+  -e JWT_PASSPHRASE="…" \
+  mtg-store-backend
+```
+
+Run migrations against the production database as a release step
+(`php bin/console doctrine:migrations:migrate --no-interaction`), and sync the
+catalog via the worker (`php bin/console app:scryfall:sync`).
+
+### Health probes
+
+Two unauthenticated endpoints (outside the `/api` JWT firewall) for load
+balancers and orchestrators:
+
+| Endpoint | Purpose | Behavior |
+|----------|---------|----------|
+| `GET /health` | Liveness | `200 {"status":"ok"}` — no I/O; is the process up? |
+| `GET /health/ready` | Readiness | Pings the DB; `200` when reachable, `503` when not (pull the instance from rotation). |
+
+The Docker image's `HEALTHCHECK` hits `/health`.
 
 ---
 

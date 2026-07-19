@@ -104,6 +104,8 @@ sequenceDiagram
 
 Orders are API Platform resources. Store owners read orders through `StoreOrderCollectionProvider`, can create manual orders through `StoreOrderProcessor`, and update status through `StoreOrderStatusProcessor`.
 
+> **Scaling note.** The owner order list is **server-paginated** (`?page=`/`?itemsPerPage=`, newest first) and the customer "my orders" lookup is bounded and backed by an expression index on `(store_id, LOWER(customer_email))`. Both fetch-join `lines` **and** `line.card` (two-step: page order ids, then load with joins) so serializing order lines no longer triggers one lazy card query per line (N+1). The admin frontend walks pages; the customer view takes the most recent page.
+
 ```mermaid
 flowchart LR
     subgraph FE["Frontend: store admin"]
@@ -117,7 +119,7 @@ flowchart LR
     route --> read["StoreOrderCollectionProvider / StoreOrderItemProvider"]
     route --> create["StoreOrderProcessor"]
     route --> write["StoreOrderStatusProcessor"]
-    read --> repo["OrderRepository::findByStore()"]
+    read --> repo["OrderRepository::findPageByStore()<br/>(paginated, lines+cards fetch-joined)"]
     create --> db
     write --> db["orders UPDATE"]
     repo --> db2["orders JOIN order_lines"]

@@ -5,6 +5,8 @@ namespace App\Service\Scryfall;
 use App\Entity\Card;
 use App\Repository\CardRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use JsonMachine\Items;
+use JsonMachine\JsonDecoder\ExtJsonDecoder;
 use Symfony\Component\Uid\Uuid;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -14,20 +16,36 @@ class ScryfallClient
     private const SEARCH_URL = 'https://api.scryfall.com/cards/search';
     private const CARD_URL = 'https://api.scryfall.com/cards/';
     private const COLLECTION_URL = 'https://api.scryfall.com/cards/collection';
-    private const MIN_REQUEST_INTERVAL_MICROSECONDS = 125000;
 
-    private static int $lastRequestAt = 0;
+    /**
+     * `oracle_cards` is one representative printing per Oracle ID (~35k rows,
+     * ~170 MB) — enough for rules text and search, but NOT enough to resolve
+     * store imports, which identify a specific printing by set + collector
+     * number. `default_cards` is every printing (~450k rows) and is what lets
+     * the local catalog answer imports without falling back to the API.
+     */
+    public const BULK_TYPE_ORACLE = 'oracle_cards';
+    public const BULK_TYPE_DEFAULT = 'default_cards';
+    public const BULK_TYPES = [self::BULK_TYPE_ORACLE, self::BULK_TYPE_DEFAULT];
+
+    private const SYNC_BATCH_SIZE = 200;
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly EntityManagerInterface $entityManager,
         private readonly CardRepository $cardRepository,
+        private readonly ScryfallCardUpserter $cardUpserter,
+        private readonly ScryfallRateLimiter $rateLimiter,
     ) {
     }
 
     /** @return array{download_uri: string, updated_at: string} */
-    public function getOracleCardsBulkInfo(): array
+    public function getBulkInfo(string $type): array
     {
+        if (!in_array($type, self::BULK_TYPES, true)) {
+            throw new \InvalidArgumentException(sprintf('Unknown Scryfall bulk type "%s".', $type));
+        }
+
         $response = $this->httpClient->request('GET', self::BULK_DATA_URL, [
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
         ]);
@@ -43,14 +61,14 @@ class ScryfallClient
         }
 
         foreach ($items as $item) {
-            if (!is_array($item) || ($item['type'] ?? '') !== 'oracle_cards') {
+            if (!is_array($item) || ($item['type'] ?? '') !== $type) {
                 continue;
             }
 
             $downloadUri = $item['download_uri'] ?? null;
             $updatedAt = $item['updated_at'] ?? null;
             if (!is_string($downloadUri) || '' === $downloadUri || !is_string($updatedAt) || '' === $updatedAt) {
-                throw new \RuntimeException('oracle_cards bulk data entry is missing download_uri or updated_at.');
+                throw new \RuntimeException(sprintf('%s bulk data entry is missing download_uri or updated_at.', $type));
             }
 
             return [
@@ -59,17 +77,26 @@ class ScryfallClient
             ];
         }
 
-        throw new \RuntimeException('oracle_cards bulk data not found.');
+        throw new \RuntimeException(sprintf('%s bulk data not found.', $type));
     }
 
     /**
-     * @param callable(int, int, int): void|null $onProgress
+     * Sync a Scryfall bulk dataset into the local catalog.
+     *
+     * The bulk JSON is streamed to a temp file, then parsed incrementally
+     * (JsonMachine) and written in multi-row ON CONFLICT batches — neither
+     * the raw body, the decoded card list, nor ORM entities are ever held
+     * in memory, so the multi-hundred-MB `default_cards` file syncs with
+     * flat memory usage.
+     *
+     * @param callable(int, int): void|null $onProgress receives (processed, changed);
+     *                                                  the dataset size is unknown while streaming
      *
      * @return array{inserted: int, updated: int, total: int}
      */
-    public function syncOracleCards(?callable $onProgress = null): array
+    public function syncBulkCards(?callable $onProgress = null, string $type = self::BULK_TYPE_DEFAULT): array
     {
-        $info = $this->getOracleCardsBulkInfo();
+        $info = $this->getBulkInfo($type);
         $response = $this->httpClient->request('GET', $info['download_uri'], [
             'headers' => ['User-Agent' => 'MTGStore/1.0'],
         ]);
@@ -78,10 +105,7 @@ class ScryfallClient
             throw new \RuntimeException(sprintf('Scryfall bulk download failed with status %d.', $response->getStatusCode()));
         }
 
-        // Stream the (~100+ MB) bulk JSON to a temp file instead of holding the
-        // entire HTTP body string in memory. We open a writable resource and let
-        // HttpClient::stream() push chunks into it as they arrive.
-        $tmpPath = tempnam(sys_get_temp_dir(), 'scryfall_oracle_');
+        $tmpPath = tempnam(sys_get_temp_dir(), 'scryfall_bulk_');
         if (false === $tmpPath) {
             throw new \RuntimeException('Unable to allocate a temp file for the Scryfall bulk download.');
         }
@@ -92,6 +116,10 @@ class ScryfallClient
             throw new \RuntimeException('Unable to open the temp file for the Scryfall bulk download.');
         }
 
+        $inserted = 0;
+        $updated = 0;
+        $processed = 0;
+
         try {
             foreach ($this->httpClient->stream($response) as $chunk) {
                 $content = $chunk->getContent();
@@ -101,24 +129,45 @@ class ScryfallClient
                 unset($content);
             }
             fclose($handle);
-            // Free the response so its internal buffers can be reclaimed promptly.
+            $handle = null;
             unset($response);
 
-            // NOTE: We still decode the whole document at once here, so peak
-            // memory is bounded by the decoded card array, not the raw body.
-            // The clear()-every-batch loop below further bounds Doctrine's UoW
-            // growth. This bounds — but does not eliminate — peak memory; a true
-            // streaming JSON parser (e.g. halaxa/json-machine) iterating the
-            // top-level array without materialising it is the longer-term fix,
-            // but that would add a composer dependency.
-            $content = file_get_contents($tmpPath);
-            if (false === $content) {
-                throw new \RuntimeException('Unable to read the downloaded Scryfall bulk file.');
+            // Iterate the top-level array one card at a time; only one decoded
+            // card (plus the current batch) is ever resident.
+            $cards = Items::fromFile($tmpPath, ['decoder' => new ExtJsonDecoder(true)]);
+
+            $batch = [];
+            foreach ($cards as $cardData) {
+                if (!is_array($cardData)) {
+                    continue;
+                }
+
+                $batch[] = $cardData;
+                if (count($batch) < self::SYNC_BATCH_SIZE) {
+                    continue;
+                }
+
+                $result = $this->cardUpserter->upsertMany($batch);
+                $inserted += $result['inserted'];
+                $updated += $result['updated'];
+                $processed += count($batch);
+                $batch = [];
+
+                if (null !== $onProgress) {
+                    $onProgress($processed, $inserted + $updated);
+                }
             }
 
-            /** @var list<array<string, mixed>> $cards */
-            $cards = json_decode($content, true, flags: JSON_THROW_ON_ERROR);
-            unset($content);
+            if ([] !== $batch) {
+                $result = $this->cardUpserter->upsertMany($batch);
+                $inserted += $result['inserted'];
+                $updated += $result['updated'];
+                $processed += count($batch);
+
+                if (null !== $onProgress) {
+                    $onProgress($processed, $inserted + $updated);
+                }
+            }
         } finally {
             if (is_resource($handle)) {
                 fclose($handle);
@@ -126,34 +175,7 @@ class ScryfallClient
             @unlink($tmpPath);
         }
 
-        $inserted = 0;
-        $updated = 0;
-        $batchSize = 500;
-        $total = count($cards);
-
-        foreach (array_chunk($cards, $batchSize) as $chunkIndex => $chunk) {
-            foreach ($chunk as $cardData) {
-                $result = $this->upsertFromScryfallData($cardData);
-                if ($result === 'inserted') {
-                    ++$inserted;
-                } elseif ($result === 'updated') {
-                    ++$updated;
-                }
-            }
-
-            $this->entityManager->flush();
-            // Detach managed entities every batch to bound the unit-of-work size.
-            $this->entityManager->clear();
-            // Drop the processed chunk so it can be garbage collected.
-            unset($chunk);
-
-            if (null !== $onProgress) {
-                $processed = min(($chunkIndex + 1) * $batchSize, $total);
-                $onProgress($processed, $total, $inserted + $updated);
-            }
-        }
-
-        return ['inserted' => $inserted, 'updated' => $updated, 'total' => $total];
+        return ['inserted' => $inserted, 'updated' => $updated, 'total' => $processed];
     }
 
     /** @return list<Card> */
@@ -191,21 +213,26 @@ class ScryfallClient
             return [];
         }
 
-        $cards = [];
+        $batch = [];
         foreach (array_slice($data, 0, $limit) as $cardData) {
-            if (!is_array($cardData) || !isset($cardData['id'])) {
-                continue;
+            if (is_array($cardData) && isset($cardData['id'])) {
+                $batch[] = $cardData;
             }
+        }
 
-            $this->upsertFromScryfallData($cardData);
-            $id = Uuid::fromString($cardData['id']);
-            $card = $this->cardRepository->find($id);
+        if ([] === $batch) {
+            return [];
+        }
+
+        $this->cardUpserter->upsertMany($batch);
+
+        $cards = [];
+        foreach ($batch as $cardData) {
+            $card = $this->loadFreshCard(Uuid::fromString((string) $cardData['id']));
             if ($card instanceof Card) {
                 $cards[] = $card;
             }
         }
-
-        $this->entityManager->flush();
 
         return $cards;
     }
@@ -213,7 +240,7 @@ class ScryfallClient
     /**
      * @param list<array{set: string, collectorNumber: string}> $identifiers
      *
-     * @return array<string, Card> keyed by "set|collectorNumber"
+     * @return array<string, Card> keyed by "set|collectorNumber" (see collectionKey())
      */
     public function fetchCollectionBySetCollectors(array $identifiers): array
     {
@@ -225,7 +252,7 @@ class ScryfallClient
                 continue;
             }
 
-            $unique[$this->collectionKey($set, $collectorNumber)] = [
+            $unique[self::collectionKey($set, $collectorNumber)] = [
                 'set' => $set,
                 'collector_number' => $collectorNumber,
             ];
@@ -249,25 +276,31 @@ class ScryfallClient
                 continue;
             }
 
+            $batch = [];
             foreach ($data as $cardData) {
-                if (!is_array($cardData) || !isset($cardData['id'])) {
-                    continue;
+                if (is_array($cardData) && isset($cardData['id'])) {
+                    $batch[] = $cardData;
                 }
+            }
 
-                $this->upsertFromScryfallData($cardData);
-                $key = $this->collectionKey(
+            if ([] === $batch) {
+                continue;
+            }
+
+            $this->cardUpserter->upsertMany($batch);
+
+            foreach ($batch as $cardData) {
+                $key = self::collectionKey(
                     (string) ($cardData['set'] ?? ''),
                     (string) ($cardData['collector_number'] ?? ''),
                 );
                 $matchedIds[$key] = Uuid::fromString((string) $cardData['id']);
             }
-
-            $this->entityManager->flush();
         }
 
         $matches = [];
         foreach ($matchedIds as $key => $id) {
-            $card = $this->cardRepository->find($id);
+            $card = $this->loadFreshCard($id);
             if ($card instanceof Card) {
                 $matches[$key] = $card;
             }
@@ -297,23 +330,42 @@ class ScryfallClient
             return null;
         }
 
-        $this->upsertFromScryfallData($data);
-        $this->entityManager->flush();
+        $this->cardUpserter->upsertOne($data);
 
-        return $this->cardRepository->find($id);
+        return $this->loadFreshCard($id);
+    }
+
+    /**
+     * Canonical map key for collection lookups: lowercased "set|collectorNumber".
+     * Shared with the CSV import handler so both sides build identical keys.
+     */
+    public static function collectionKey(string $set, string $collectorNumber): string
+    {
+        return strtolower(trim($set)).'|'.strtolower(trim($collectorNumber));
+    }
+
+    /**
+     * Loads a card after a native upsert. The upsert bypasses the ORM, so a
+     * previously-managed instance in the identity map would be stale —
+     * refresh() re-reads the committed row into the managed entity.
+     */
+    private function loadFreshCard(Uuid $id): ?Card
+    {
+        $card = $this->cardRepository->find($id);
+        if (!$card instanceof Card) {
+            return null;
+        }
+
+        $this->entityManager->refresh($card);
+
+        return $card;
     }
 
     /** @param array<string, mixed> $options */
     private function requestWithRateLimit(string $method, string $url, array $options): \Symfony\Contracts\HttpClient\ResponseInterface
     {
-        $now = (int) floor(microtime(true) * 1_000_000);
-        $elapsed = $now - self::$lastRequestAt;
-        if ($elapsed < self::MIN_REQUEST_INTERVAL_MICROSECONDS) {
-            usleep(self::MIN_REQUEST_INTERVAL_MICROSECONDS - $elapsed);
-        }
-
+        $this->rateLimiter->acquire();
         $response = $this->httpClient->request($method, $url, $options);
-        self::$lastRequestAt = (int) floor(microtime(true) * 1_000_000);
 
         if (429 !== $response->getStatusCode()) {
             return $response;
@@ -323,71 +375,8 @@ class ScryfallClient
         $retryAfter = isset($headers['retry-after'][0]) ? (float) $headers['retry-after'][0] : 1.0;
         usleep(max(1, (int) ceil($retryAfter * 1_000_000)));
 
-        $response = $this->httpClient->request($method, $url, $options);
-        self::$lastRequestAt = (int) floor(microtime(true) * 1_000_000);
+        $this->rateLimiter->acquire();
 
-        return $response;
-    }
-
-    /** @param array<string, mixed> $data */
-    private function upsertFromScryfallData(array $data): string
-    {
-        if (!isset($data['id'], $data['oracle_id'], $data['name'])) {
-            return 'skipped';
-        }
-
-        $id = Uuid::fromString($data['id']);
-        $existing = $this->cardRepository->find($id);
-        $card = $existing ?? new Card($id);
-        $isNew = null === $existing;
-
-        $card
-            ->setOracleId(Uuid::fromString($data['oracle_id']))
-            ->setName($this->truncate((string) $data['name'], 255))
-            ->setSetCode($this->truncate((string) ($data['set'] ?? ''), 10))
-            ->setCollectorNumber($this->truncate((string) ($data['collector_number'] ?? ''), 20))
-            ->setRarity(isset($data['rarity']) ? $this->truncate((string) $data['rarity'], 20) : null)
-            ->setManaCost(isset($data['mana_cost']) ? $this->truncate((string) $data['mana_cost'], 64) : null)
-            ->setTypeLine(isset($data['type_line']) ? $this->truncate((string) $data['type_line'], 255) : null)
-            ->setOracleText(isset($data['oracle_text']) ? (string) $data['oracle_text'] : null)
-            ->setCmc(isset($data['cmc']) ? (float) $data['cmc'] : null)
-            ->setImageUris(isset($data['image_uris']) && is_array($data['image_uris']) ? $data['image_uris'] : null)
-            ->setPrices(isset($data['prices']) && is_array($data['prices']) ? $data['prices'] : null)
-            ->setSetName(isset($data['set_name']) ? $this->truncate((string) $data['set_name'], 255) : null)
-            ->setColors(isset($data['colors']) && is_array($data['colors']) ? array_values($data['colors']) : null)
-            ->setColorIdentity(isset($data['color_identity']) && is_array($data['color_identity']) ? array_values($data['color_identity']) : null)
-            ->setKeywords(isset($data['keywords']) && is_array($data['keywords']) ? array_values($data['keywords']) : null)
-            ->setPower(isset($data['power']) ? $this->truncate((string) $data['power'], 16) : null)
-            ->setToughness(isset($data['toughness']) ? $this->truncate((string) $data['toughness'], 16) : null)
-            ->setLoyalty(isset($data['loyalty']) ? $this->truncate((string) $data['loyalty'], 16) : null)
-            ->setArtist(isset($data['artist']) ? $this->truncate((string) $data['artist'], 255) : null)
-            ->setFlavorText(isset($data['flavor_text']) ? (string) $data['flavor_text'] : null)
-            ->setLegalities(isset($data['legalities']) && is_array($data['legalities']) ? $data['legalities'] : null)
-            ->setFinishes(isset($data['finishes']) && is_array($data['finishes']) ? array_values($data['finishes']) : null)
-            ->setGames(isset($data['games']) && is_array($data['games']) ? array_values($data['games']) : null)
-            ->setReleasedAt(isset($data['released_at']) ? new \DateTimeImmutable((string) $data['released_at']) : null)
-            ->setLang(isset($data['lang']) ? $this->truncate((string) $data['lang'], 16) : null)
-            ->setLayout(isset($data['layout']) ? $this->truncate((string) $data['layout'], 32) : null)
-            ->setScryfallUri(isset($data['scryfall_uri']) ? $this->truncate((string) $data['scryfall_uri'], 512) : null)
-            ->setScryfallData($data)
-            ->setScryfallUpdatedAt(isset($data['updated_at']) ? new \DateTimeImmutable((string) $data['updated_at']) : null);
-
-        if ($isNew) {
-            $this->entityManager->persist($card);
-
-            return 'inserted';
-        }
-
-        return 'updated';
-    }
-
-    private function truncate(string $value, int $maxLength): string
-    {
-        return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
-    }
-
-    private function collectionKey(string $set, string $collectorNumber): string
-    {
-        return strtolower(trim($set)).'|'.strtolower(trim($collectorNumber));
+        return $this->httpClient->request($method, $url, $options);
     }
 }

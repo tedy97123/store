@@ -18,6 +18,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\Entity(repositoryClass: InventoryItemRepository::class)]
 #[ORM\Table(name: 'inventory_items')]
 #[ORM\UniqueConstraint(name: 'UNIQ_INVENTORY_STORE_CARD', fields: ['store', 'card', 'condition', 'isFoil'])]
+#[ORM\Index(name: 'idx_inventory_store_id_id', columns: ['store_id', 'id'])]
 #[ApiResource(
     operations: [
         new GetCollection(
@@ -121,6 +122,18 @@ class InventoryItem
     #[Groups(['inventory:read', 'inventory:write'])]
     private ?string $notes = null;
 
+    /**
+     * Optimistic-locking version. Quantity updates are read-modify-write
+     * (see StoreInventoryWriter); without this, two concurrent writers both
+     * computing `current + n` silently lose one increment. With it, the
+     * stale flush throws OptimisticLockException — the import worker
+     * requeues and retries the batch, web callers surface a retryable
+     * conflict instead of corrupting stock counts.
+     */
+    #[ORM\Version]
+    #[ORM\Column(type: 'integer', options: ['default' => 1])]
+    private int $version = 1;
+
     public function getId(): ?int
     {
         return $this->id;
@@ -220,6 +233,11 @@ class InventoryItem
         $this->isFoil = $isFoil;
 
         return $this;
+    }
+
+    public function getVersion(): int
+    {
+        return $this->version;
     }
 
     public function getNotes(): ?string

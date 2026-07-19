@@ -14,6 +14,20 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 #[Route('/api/catalog')]
 class CardSearchController extends AbstractController
 {
+    /**
+     * When a filtered local search returns at least this many cards, the
+     * result set is considered good enough to skip the Scryfall fallback.
+     */
+    private const REMOTE_FALLBACK_THRESHOLD = 15;
+
+    /**
+     * Hard cap on resolve-batch rows per request. Each unresolvable row can
+     * cost remote lookups against the host-global Scryfall budget, so an
+     * unbounded array from any authenticated user was a platform-wide DoS
+     * vector (50k bogus rows ≈ hours of monopolised rate-limiter time).
+     */
+    private const MAX_RESOLVE_BATCH_ROWS = 100;
+
     public function __construct(
         private readonly CardRepository $cardRepository,
         private readonly ScryfallClient $scryfallClient,
@@ -42,12 +56,20 @@ class CardSearchController extends AbstractController
             $this->cardRepository->searchByName($query, 60),
             fn (\App\Entity\Card $card): bool => $this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish),
         );
-        $remote = $this->scryfallClient->searchRemoteAndUpsert(
-            $query,
-            40,
-            '' !== $setCode ? $setCode : null,
-            '' !== $finish ? $finish : null,
-        );
+
+        // Local-first: only fall back to Scryfall (a rate-limited remote call
+        // plus catalog writes) when the local catalog comes up thin. As the
+        // card table fills in from bulk syncs and past imports, the remote
+        // leg — and its per-keystroke API/write load — disappears.
+        $remote = [];
+        if (count($local) < self::REMOTE_FALLBACK_THRESHOLD) {
+            $remote = $this->scryfallClient->searchRemoteAndUpsert(
+                $query,
+                40,
+                '' !== $setCode ? $setCode : null,
+                '' !== $finish ? $finish : null,
+            );
+        }
         $merged = [];
         foreach (array_merge($local, $remote) as $card) {
             if ($this->catalogCardResolver->matchesFilters($card, $setCode, $collectorNumber, $rarity, $finish)) {
@@ -68,6 +90,11 @@ class CardSearchController extends AbstractController
         /** @var array{rows?: list<array<string, mixed>>} $payload */
         $payload = json_decode($request->getContent(), true) ?? [];
         $rows = is_array($payload['rows'] ?? null) ? $payload['rows'] : [];
+        if (count($rows) > self::MAX_RESOLVE_BATCH_ROWS) {
+            return $this->json([
+                'detail' => sprintf('Too many rows: maximum %d per request.', self::MAX_RESOLVE_BATCH_ROWS),
+            ], 400);
+        }
         $results = [];
 
         foreach ($rows as $row) {
