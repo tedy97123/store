@@ -21,7 +21,13 @@ security:
                 username_path: email
                 password_path: password
                 success_handler: lexik_jwt_authentication.handler.authentication_success
-                failure_handler: lexik_jwt_authentication.handler.authentication_failure
+                failure_handler: App\Security\AuthenticationFailureHandler
+            # Brute-force protection: after too many failed logins from the same
+            # IP+username, further attempts get 429 until the window passes.
+            # Backed by symfony/rate-limiter (see config/packages/rate_limiter.yaml).
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
         api:
             pattern: ^/api
             stateless: true

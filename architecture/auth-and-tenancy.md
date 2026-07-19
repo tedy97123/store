@@ -46,6 +46,8 @@ flowchart LR
 
 - Token is stored in `localStorage` and attached as `Authorization: Bearer <token>` by an axios request interceptor in `frontend/src/api/client.ts`. A response interceptor clears the token and redirects to `/login` on `401`.
 - The `api` firewall is **stateless** (no session); every request re-validates the JWT and reloads the user via `loadUserByIdentifier`.
+- **Brute-force protection:** the `login` firewall enables `login_throttling` (max 5 failed attempts per IP+username per 15 min, backed by `symfony/rate-limiter`). Because Lexik's failure handler renders every failure as `401`, `App\Security\AuthenticationFailureHandler` decorates it to return **`429 Too Many Requests`** (with `Retry-After`) for the throttle case and delegate all other failures to Lexik unchanged.
+- **Request correlation:** `App\EventSubscriber\RequestIdSubscriber` assigns each request a correlation id (honoring an inbound `X-Request-Id`), echoes it on the response header, and logs unhandled exceptions with structured context (`request_id`, method, path, status) for traceability.
 
 | Layer | Where |
 |-------|-------|

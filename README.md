@@ -353,6 +353,20 @@ balancers and orchestrators:
 
 The Docker image's `HEALTHCHECK` hits `/health`.
 
+### Security & observability
+
+- **Login brute-force protection:** the `login` firewall throttles failed
+  logins (5 per IP+username per 15 min) and returns **`429 Too Many Requests`**
+  once exceeded. Tune `max_attempts`/`interval` in `config/packages/security.yaml`.
+- **Request correlation:** every response carries an `X-Request-Id` (an inbound
+  one from a proxy/gateway is honored, otherwise generated). Unhandled
+  exceptions are logged with structured context (`request_id`, method, path,
+  status) so a single request can be traced across logs.
+- **Logs:** the app logs to `stderr` (12-factor) — in the container image these
+  are captured by your orchestrator's log driver. (`symfony/monolog-bundle`
+  isn't yet Symfony 8.1 compatible; wire it in for JSON handlers/routing once it
+  is.)
+
 ---
 
 ## Troubleshooting
