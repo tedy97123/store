@@ -99,6 +99,23 @@ final class CatalogFixtures
         return $store;
     }
 
+    /**
+     * @param list<string> $roles
+     */
+    public function user(array $roles = ['ROLE_USER'], ?string $email = null): User
+    {
+        $email ??= 'user-'.(++self::$storeCounter).'@test.local';
+        $user = new User();
+        $user->setEmail($email);
+        $user->setPassword('x');
+        $user->setDisplayName('Test User');
+        $user->setRoles($roles);
+        $this->em->persist($user);
+        $this->em->flush();
+
+        return $user;
+    }
+
     public function inventoryItem(Store $store, Card $card, int $quantity = 1, CardCondition $condition = CardCondition::NM, bool $isFoil = false): InventoryItem
     {
         $item = new InventoryItem();

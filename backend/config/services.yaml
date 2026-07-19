@@ -36,3 +36,19 @@ services:
     App\Service\Scryfall\ScryfallRateLimiter:
         arguments:
             $lockFilePath: '%kernel.project_dir%/var/scryfall_rate.lock'
+
+    # Per-import run logs live under the logs dir (var/log/imports/*.log).
+    App\Service\Import\ImportLogger:
+        arguments:
+            $importLogDir: '%kernel.logs_dir%/imports'
+
+when@test:
+    services:
+        # Replace the real Scryfall client with a network-free fake so the test
+        # suite is deterministic and never reaches the live API.
+        App\Tests\Support\FakeScryfallClient:
+            autowire: true
+            public: true
+        App\Service\Scryfall\ScryfallClient:
+            alias: App\Tests\Support\FakeScryfallClient
+            public: true

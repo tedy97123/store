@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Tests\Controller;
+
+use App\Entity\Card;
+use App\Entity\CsvImportJob;
+use App\Entity\CsvImportRow;
+use App\Entity\Store;
+use App\Repository\InventoryItemRepository;
+use App\Tests\Support\CatalogFixtures;
+use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+
+/**
+ * The CSV failed-row recovery flows: per-row manual import, batch retry of all
+ * failed rows, and the failed-row preview. These are the flows the user drives
+ * from the import run page after a batch leaves some rows unmatched.
+ */
+final class CsvImportRecoveryTest extends WebTestCase
+{
+    private EntityManagerInterface $em;
+    private CatalogFixtures $fixtures;
+    private InventoryItemRepository $items;
+    private object $client;
+    private Store $store;
+
+    protected function setUp(): void
+    {
+        $this->client = static::createClient();
+        $c = static::getContainer();
+        $this->em = $c->get('doctrine')->getManager();
+        $this->items = $c->get(InventoryItemRepository::class);
+        $this->fixtures = new CatalogFixtures($this->em);
+        $this->store = $this->fixtures->store('recovery-store');
+        // The store's owner is authorized for STORE_MANAGE.
+        $this->client->loginUser($this->store->getOwner());
+    }
+
+    private function jobWithFailedRow(string $name, string $set, string $collector): array
+    {
+        $job = new CsvImportJob();
+        $job->setStore($this->store);
+        $job->setStatus(CsvImportJob::STATUS_COMPLETED);
+        $job->setOriginalFilename('t.csv');
+        $job->setStoragePath('');
+        $job->setTotalRows(1);
+        $job->setProcessedRows(1);
+        $job->setFailedRows(1);
+        $this->em->persist($job);
+
+        $row = new CsvImportRow();
+        $row->setJob($job);
+        $row->setRowIndex(0);
+        $row->setName($name);
+        $row->setSetCode($set);
+        $row->setCollectorNumber($collector);
+        $row->setQuantity(2);
+        $row->setStatus(CsvImportRow::STATUS_ERROR);
+        $row->setError('No matching printing found.');
+        $this->em->persist($row);
+        $this->em->flush();
+
+        return [$job, $row];
+    }
+
+    public function testManualImportRowResolvesFailedRowIntoInventory(): void
+    {
+        [$job] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');
+        $card = $this->fixtures->card(1, ['name' => 'Sol Ring', 'set' => 'c21', 'collector_number' => '263']);
+
+        $this->client->request(
+            'POST',
+            sprintf('/api/stores/%s/csv-imports/%d/rows/0/manual-import', $this->store->getSlug(), $job->getId()),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['cardId' => (string) $card->getId(), 'quantity' => 2, 'condition' => 'NM', 'isFoil' => false]),
+        );
+
+        self::assertResponseIsSuccessful();
+
+        $this->em->clear();
+        $row = $this->em->getRepository(CsvImportRow::class)->findOneBy(['job' => $job->getId(), 'rowIndex' => 0]);
+        self::assertSame(CsvImportRow::STATUS_IMPORTED, $row->getStatus());
+        self::assertNotNull($row->getImportedItemId());
+
+        $store = $this->em->getRepository(Store::class)->find($this->store->getId());
+        self::assertSame(1, $this->items->countByStore($store), 'the resolved card should now be in inventory');
+    }
+
+    public function testManualImportRowRejectsUnknownCard(): void
+    {
+        [$job] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');
+
+        $this->client->request(
+            'POST',
+            sprintf('/api/stores/%s/csv-imports/%d/rows/0/manual-import', $this->store->getSlug(), $job->getId()),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['cardId' => '11111111-2222-4333-8444-555566667777']),
+        );
+
+        self::assertSame(404, $this->client->getResponse()->getStatusCode());
+    }
+
+    public function testRetryFailedRequeuesErrorRows(): void
+    {
+        [$job, $row] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');
+
+        $this->client->request('POST', sprintf('/api/stores/%s/csv-imports/%d/retry-failed', $this->store->getSlug(), $job->getId()));
+        self::assertResponseIsSuccessful();
+
+        $this->em->clear();
+        $reloaded = $this->em->getRepository(CsvImportRow::class)->find($row->getId());
+        self::assertSame(CsvImportRow::STATUS_QUEUED, $reloaded->getStatus(), 'failed rows are requeued for reprocessing');
+        self::assertNull($reloaded->getError());
+    }
+
+    public function testFailedPreviewMatchesByNaturalKey(): void
+    {
+        [$job] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');
+        $this->fixtures->card(1, ['name' => 'Sol Ring', 'set' => 'c21', 'collector_number' => '263']);
+
+        $this->client->request('POST', sprintf('/api/stores/%s/csv-imports/%d/failed/preview', $this->store->getSlug(), $job->getId()));
+        self::assertResponseIsSuccessful();
+
+        $body = json_decode($this->client->getResponse()->getContent(), true);
+        self::assertSame(1, $body['totalFailedRows']);
+        self::assertCount(1, $body['results']);
+        self::assertArrayHasKey('card', $body['results'][0], 'the failed row should preview a matched card');
+        self::assertSame('Sol Ring', $body['results'][0]['card']['name']);
+    }
+
+    public function testRecoveryEndpointsRejectNonOwner(): void
+    {
+        [$job] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');
+
+        // A different, unrelated user must not touch this store's import.
+        $this->client->loginUser($this->fixtures->user(['ROLE_USER']));
+        $this->client->request('POST', sprintf('/api/stores/%s/csv-imports/%d/retry-failed', $this->store->getSlug(), $job->getId()));
+
+        self::assertSame(403, $this->client->getResponse()->getStatusCode());
+    }
+}

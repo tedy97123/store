@@ -54,6 +54,7 @@ final class StoreCsvImportController extends AbstractController
         private readonly ScryfallClient $scryfallClient,
         private readonly EntityManagerInterface $entityManager,
         private readonly MessageBusInterface $messageBus,
+        private readonly \App\Service\Import\ImportLogger $importLogger,
     ) {
     }
 
@@ -257,6 +258,8 @@ final class StoreCsvImportController extends AbstractController
             $this->requeueJob($job);
         }
 
+        $this->importLogger->log($job, 'retry_failed_requested', ['requeued' => $retriedRows]);
+
         return $this->json($this->serializeJobSummary($job));
     }
 
@@ -411,6 +414,8 @@ final class StoreCsvImportController extends AbstractController
         $this->syncJobCounters($job);
         $this->entityManager->flush();
 
+        $this->importLogger->log($job, 'batch_manually_resolved', ['rows' => count($written)]);
+
         return $this->json($this->serializeJob($job, $request));
     }
 
@@ -465,6 +470,12 @@ final class StoreCsvImportController extends AbstractController
         }
         $this->syncJobCounters($job);
         $this->entityManager->flush();
+
+        $this->importLogger->log($job, 'row_manually_resolved', [
+            'rowIndex' => $rowIndex,
+            'name' => $row->getName(),
+            'cardId' => (string) $card->getId(),
+        ]);
 
         return $this->json($this->serializeJob($job, $request));
     }
