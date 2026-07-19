@@ -6,15 +6,17 @@ import OrdersTab from './store-admin/OrdersTab'
 import CsvTab from './store-admin/CsvTab'
 import ReportsTab from './store-admin/ReportsTab'
 import SpotlightTab from './store-admin/SpotlightTab'
+import CaseCardsTab from './store-admin/CaseCardsTab'
 import BrandingTab from './store-admin/BrandingTab'
 import PaymentsTab from './store-admin/PaymentsTab'
 
-type Section = 'inventory' | 'branding' | 'spotlight' | 'payments' | 'orders' | 'reports' | 'csv'
+type Section = 'inventory' | 'branding' | 'spotlight' | 'case-cards' | 'payments' | 'orders' | 'reports' | 'csv'
 
 const SECTIONS: Record<Section, { label: string; render: (slug: string) => React.ReactNode }> = {
   inventory: { label: 'Inventory', render: (slug) => <SearchTab slug={slug} /> },
   branding: { label: 'Branding', render: (slug) => <BrandingTab slug={slug} /> },
   spotlight: { label: 'Spotlight', render: (slug) => <SpotlightTab slug={slug} /> },
+  'case-cards': { label: 'Case cards', render: (slug) => <CaseCardsTab slug={slug} /> },
   payments: { label: 'Payments', render: (slug) => <PaymentsTab slug={slug} /> },
   orders: { label: 'Orders', render: (slug) => <OrdersTab slug={slug} /> },
   reports: { label: 'Reports', render: (slug) => <ReportsTab slug={slug} /> },

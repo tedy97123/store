@@ -29,6 +29,7 @@ Two backend styles coexist:
 | **Auth & tenancy** | Login, register, `/me`, JWT mechanics, role-based access, and tenant SQL filtering | [auth-and-tenancy.md](auth-and-tenancy.md) |
 | **Stores & branding** | Public store directory, storefront by slug, branding/theme editor, store payment connections, platform admin | [stores-and-branding.md](stores-and-branding.md) |
 | **Catalog & inventory** | Card catalog search, inventory browse, inventory CRUD, Scryfall bulk sync, card details, spotlight | [catalog-and-inventory.md](catalog-and-inventory.md) |
+| **Case cards** | Owner-curated storefront sections filled manually or auto-pulled by price/rarity from inventory | [case-cards.md](case-cards.md) |
 | **CSV import** | Async bulk import lifecycle, failed-row recovery, card resolution, inventory writes, and live polling | [csv-import.md](csv-import.md) |
 | **Customers & orders** | Per-store customer profiles, favorites, want lists, cart, test checkout, order workflow, notifications, and reports | [customers-and-orders.md](customers-and-orders.md) |
 

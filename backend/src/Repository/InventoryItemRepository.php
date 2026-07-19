@@ -73,6 +73,44 @@ class InventoryItemRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    /**
+     * Inventory listings matching a case section's auto criteria — in stock,
+     * within an optional price range, of an optional rarity — highest price
+     * first. Used by the "Pull from inventory" action to materialise an auto
+     * section.
+     *
+     * @return list<InventoryItem>
+     */
+    public function findForAutoSection(
+        Store $store,
+        ?int $minPriceCents,
+        ?int $maxPriceCents,
+        ?string $rarity,
+        int $limit,
+    ): array {
+        $qb = $this->createQueryBuilder('i')
+            ->join('i.card', 'c')
+            ->addSelect('c')
+            ->andWhere('i.store = :store')
+            ->andWhere('i.quantity > 0')
+            ->setParameter('store', $store)
+            ->orderBy('i.priceCents', 'DESC')
+            ->addOrderBy('i.id', 'ASC')
+            ->setMaxResults($limit);
+
+        if (null !== $minPriceCents) {
+            $qb->andWhere('i.priceCents >= :minPrice')->setParameter('minPrice', $minPriceCents);
+        }
+        if (null !== $maxPriceCents) {
+            $qb->andWhere('i.priceCents <= :maxPrice')->setParameter('maxPrice', $maxPriceCents);
+        }
+        if (null !== $rarity && '' !== $rarity) {
+            $qb->andWhere('LOWER(c.rarity) = :rarity')->setParameter('rarity', strtolower($rarity));
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
     public function findOneByStoreAndId(Store $store, int $id): ?InventoryItem
     {
         return $this->createQueryBuilder('i')

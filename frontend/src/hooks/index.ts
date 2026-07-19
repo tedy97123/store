@@ -1,5 +1,6 @@
 export { useStore } from './useStore'
 export { useInventory, inventoryKey } from './useInventory'
+export { useStoreSections, storeSectionsKey } from './useStoreSections'
 export { useOrders, ordersKey } from './useOrders'
 export { useCanManageStore } from './useCanManageStore'
 export { useDebouncedValue } from './useDebouncedValue'
