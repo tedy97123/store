@@ -2,6 +2,7 @@
 
 namespace App\EventSubscriber;
 
+use App\Monitoring\ErrorReporter;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -29,6 +30,7 @@ final class RequestIdSubscriber implements EventSubscriberInterface
 
     public function __construct(
         private readonly LoggerInterface $logger,
+        private readonly ErrorReporter $errorReporter,
     ) {
     }
 
@@ -86,6 +88,13 @@ final class RequestIdSubscriber implements EventSubscriberInterface
         // error level, so log them at a lower severity.
         if ($status >= 500) {
             $this->logger->error('Unhandled exception: {message}', $context + ['message' => $throwable->getMessage(), 'exception_object' => $throwable]);
+            // Send genuine server faults to error tracking (no-op unless a
+            // SENTRY_DSN is configured).
+            $this->errorReporter->report($throwable, [
+                'request_id' => $context['request_id'],
+                'path' => $context['path'],
+                'method' => $context['method'],
+            ]);
         } else {
             $this->logger->info('Request failed: {message}', $context + ['message' => $throwable->getMessage()]);
         }

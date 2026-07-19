@@ -114,13 +114,57 @@ jobs:
       - name: Build
         run: npm run build
 
+  security:
+    name: Security (deps + secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan can diff the whole tree.
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, sodium, intl, mbstring, ctype, iconv
+          coverage: none
+          tools: composer:v2
+
+      # Fails on any known advisory against the committed composer.lock.
+      - name: Composer audit
+        working-directory: backend
+        run: composer audit --no-interaction
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # Fail only on high/critical advisories (low/moderate are informational).
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      # Catch committed secrets/credentials before they merge.
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Single aggregating check to require in branch protection: it only passes
-  # when BOTH jobs above succeed, so one required status covers the whole suite
+  # when all jobs above succeed, so one required status covers the whole suite
   # (and new jobs are covered automatically once added to `needs`).
   ci-success:
     name: CI success
     if: always()
-    needs: [backend, frontend]
+    needs: [backend, frontend, security]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed
@@ -129,4 +173,4 @@ jobs:
           echo "A required CI job failed or was cancelled."
           exit 1
       - name: All required jobs passed
-        run: echo "Backend and frontend checks passed."
+        run: echo "Backend, frontend, and security checks passed."
