@@ -1,31 +1,40 @@
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, GalleryHorizontalEnd } from 'lucide-react'
-import { useStore, useStoreSections, useStoreTheme } from '../hooks'
+import { useStore, useStoreCases, useStoreTheme } from '../hooks'
 import { EmptyState, LoadingPanel, buttonVariants } from '../components/ui'
 import { SpotlightCard } from '../components/cards'
 import type { InventoryItem, StoreSectionCard } from '../api/types'
 
 /**
  * Storefront Case Cards page (/s/:slug/case-cards) — reached from the "Case
- * cards" quick action on the storefront. Renders the store owner's curated
- * sections, each a horizontal rail of holographic card tiles. Sections with no
- * cards are hidden here (the owner sees them in the admin view).
+ * cards" quick action. Shows the store's display cases, each divided into its
+ * sections, as horizontal rails of holographic tiles. Cards whose section
+ * pool is sold out are hidden, as are empty sections and cases.
  */
 export default function CaseCardsPage() {
   const { slug = '' } = useParams()
   const { data: store } = useStore(slug)
   useStoreTheme(store)
-  const { data: sections, isLoading, isError } = useStoreSections(slug)
+  const { data: cases, isLoading, isError } = useStoreCases(slug)
 
-  const visible = (sections ?? []).filter((section) => section.cards.length > 0)
+  const visibleCases = (cases ?? [])
+    .map((storeCase) => ({
+      ...storeCase,
+      sections: storeCase.sections
+        .map((section) => ({
+          ...section,
+          cards: section.cards.filter(
+            (entry): entry is RenderableCard => entry.remaining > 0 && Boolean(entry.inventoryItem.card),
+          ),
+        }))
+        .filter((section) => section.cards.length > 0),
+    }))
+    .filter((storeCase) => storeCase.sections.length > 0)
 
   return (
     <div className="space-y-8">
       <div className="space-y-3">
-        <Link
-          to={`/s/${slug}`}
-          className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-        >
+        <Link to={`/s/${slug}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
           <ArrowLeft aria-hidden className="size-4" />
           Back to {store?.name ?? 'store'}
         </Link>
@@ -35,7 +44,7 @@ export default function CaseCardsPage() {
           </span>
           <div>
             <h1 className="font-display text-2xl font-bold tracking-tight text-fg">Case cards</h1>
-            <p className="text-sm text-fg-muted">Featured singles, hand-picked by {store?.name ?? 'the store'}.</p>
+            <p className="text-sm text-fg-muted">Featured singles from {store?.name ?? 'the store'}'s display cases.</p>
           </div>
         </div>
       </div>
@@ -48,29 +57,30 @@ export default function CaseCardsPage() {
           title="Could not load case cards"
           description="Please try again in a moment."
         />
-      ) : visible.length === 0 ? (
+      ) : visibleCases.length === 0 ? (
         <EmptyState
           icon={GalleryHorizontalEnd}
           title="No case cards yet"
-          description="This store hasn't featured any cards in its case yet. Check back soon."
+          description="This store hasn't featured any cards in its cases yet. Check back soon."
         />
       ) : (
-        <div className="space-y-10">
-          {visible.map((section) => (
-            <section key={section.id}>
-              <h2 className="mb-4 font-display text-lg font-bold tracking-tight text-fg">
-                {section.title}
-              </h2>
-              <div className="flex snap-x gap-4 overflow-x-auto pb-2">
-                {section.cards
-                  .filter((entry): entry is RenderableCard => Boolean(entry.inventoryItem.card))
-                  .map((entry) => (
-                    <SpotlightCard
-                      key={entry.id}
-                      slug={slug}
-                      item={toInventoryItem(entry)}
-                    />
-                  ))}
+        <div className="space-y-12">
+          {visibleCases.map((storeCase) => (
+            <section key={storeCase.id}>
+              <h2 className="mb-1 font-display text-xl font-bold tracking-tight text-fg">{storeCase.name}</h2>
+              <div className="space-y-8 border-l-2 border-border pl-4">
+                {storeCase.sections.map((section) => (
+                  <div key={section.id}>
+                    <h3 className="mb-3 font-display text-base font-bold tracking-tight text-fg-muted">
+                      {section.title}
+                    </h3>
+                    <div className="flex snap-x gap-4 overflow-x-auto pb-2">
+                      {section.cards.map((entry) => (
+                        <SpotlightCard key={entry.id} slug={slug} item={toInventoryItem(entry)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           ))}

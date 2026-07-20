@@ -310,9 +310,18 @@ function printOrderSheet(order: Order) {
       const setCode = line.setCode ? line.setCode.toUpperCase() : '-'
       const collectorNumber = line.collectorNumber ?? '-'
       const lineTotal = formatPrice(line.quantity * line.priceCents)
+      // Case cards get an unmissable label telling staff exactly which
+      // physical case + section to pull from (vs. regular binder/box stock).
+      const caseQuantity = line.caseQuantity ?? 0
+      const caseBadge =
+        caseQuantity > 0
+          ? `<div class="case-badge">CASE CARD — ${escapeHtml(line.caseName ?? 'Case')} / ${escapeHtml(line.sectionTitle ?? 'Section')}${
+              caseQuantity < line.quantity ? ` · pull ${caseQuantity} of ${line.quantity} from case` : ''
+            }</div>`
+          : ''
       return `
         <tr>
-          <td>${escapeHtml(line.cardName)}</td>
+          <td>${escapeHtml(line.cardName)}${caseBadge}</td>
           <td>${escapeHtml(setCode)}</td>
           <td>${escapeHtml(collectorNumber)}</td>
           <td>${line.quantity}</td>
@@ -348,6 +357,7 @@ function printOrderSheet(order: Order) {
           .total-row.final { border-bottom: 0; font-weight: 700; }
           .total-row.final strong { font-size: 24px; }
           .tax-note { color: #6b7280; font-size: 12px; margin-top: 8px; text-align: right; }
+          .case-badge { background: #111827; border-radius: 4px; color: #ffffff; display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .05em; margin-top: 4px; padding: 2px 6px; text-transform: uppercase; }
           @media print { body { margin: 18mm; } button { display: none; } }
         </style>
       </head>
