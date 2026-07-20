@@ -69,11 +69,25 @@ final class CatalogFixtures
         $card->setRarity($data['rarity'] ?? null);
         $card->setFinishes($data['finishes'] ?? null);
         $card->setPrices($data['prices'] ?? null);
+        $card->setTypeLine($data['type_line'] ?? null);
+        $card->setColors($data['colors'] ?? null);
+        $card->setColorIdentity($data['color_identity'] ?? null);
         $card->setScryfallData($data);
         $this->em->persist($card);
         $this->em->flush();
 
         return $card;
+    }
+
+    public function storeCase(Store $store, string $name = 'Display Case'): \App\Entity\StoreCase
+    {
+        $case = new \App\Entity\StoreCase();
+        $case->setStore($store);
+        $case->setName($name);
+        $this->em->persist($case);
+        $this->em->flush();
+
+        return $case;
     }
 
     public function store(?string $slug = null): Store

@@ -37,6 +37,15 @@ class StoreSection
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private ?Store $store = null;
 
+    /**
+     * The physical display case this section belongs to. Kept alongside the
+     * direct store FK (redundant but convenient for store-scoped queries);
+     * the controller guarantees section.store === case.store.
+     */
+    #[ORM\ManyToOne(inversedBy: 'sections')]
+    #[ORM\JoinColumn(name: 'case_id', nullable: false, onDelete: 'CASCADE')]
+    private ?StoreCase $storeCase = null;
+
     #[ORM\Column(length: 120)]
     private string $title = '';
 
@@ -54,6 +63,21 @@ class StoreSection
 
     #[ORM\Column(length: 20, nullable: true)]
     private ?string $autoRarity = null;
+
+    /**
+     * Canonical color-identity code produced by ColorIdentityParser: a sorted
+     * WUBRG subset ("B", "WU", "WUBRG"), or one of the specials 'C' (colorless),
+     * 'M' (any multicolor), '4C' (any four colors). Null = no color filter.
+     */
+    #[ORM\Column(length: 8, nullable: true)]
+    private ?string $autoColorIdentity = null;
+
+    #[ORM\Column(length: 16, nullable: true)]
+    private ?string $autoSetCode = null;
+
+    /** Matched case-insensitively against the card's type line ("Creature", "Instant", …). */
+    #[ORM\Column(length: 40, nullable: true)]
+    private ?string $autoCardType = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -74,6 +98,9 @@ class StoreSection
     public function getStore(): ?Store { return $this->store; }
     public function setStore(?Store $store): static { $this->store = $store; return $this; }
 
+    public function getStoreCase(): ?StoreCase { return $this->storeCase; }
+    public function setStoreCase(?StoreCase $storeCase): static { $this->storeCase = $storeCase; return $this; }
+
     public function getTitle(): string { return $this->title; }
     public function setTitle(string $title): static { $this->title = $title; return $this; }
 
@@ -91,6 +118,15 @@ class StoreSection
 
     public function getAutoRarity(): ?string { return $this->autoRarity; }
     public function setAutoRarity(?string $rarity): static { $this->autoRarity = $rarity; return $this; }
+
+    public function getAutoColorIdentity(): ?string { return $this->autoColorIdentity; }
+    public function setAutoColorIdentity(?string $code): static { $this->autoColorIdentity = $code; return $this; }
+
+    public function getAutoSetCode(): ?string { return $this->autoSetCode; }
+    public function setAutoSetCode(?string $setCode): static { $this->autoSetCode = $setCode; return $this; }
+
+    public function getAutoCardType(): ?string { return $this->autoCardType; }
+    public function setAutoCardType(?string $cardType): static { $this->autoCardType = $cardType; return $this; }
 
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 

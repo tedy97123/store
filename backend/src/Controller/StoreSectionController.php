@@ -4,13 +4,19 @@ namespace App\Controller;
 
 use App\Entity\InventoryItem;
 use App\Entity\Store;
+use App\Entity\StoreCase;
 use App\Entity\StoreSection;
 use App\Entity\StoreSectionCard;
+use App\Enum\OrderStatus;
 use App\Repository\InventoryItemRepository;
+use App\Repository\OrderLineRepository;
+use App\Repository\StoreCaseRepository;
 use App\Repository\StoreRepository;
 use App\Repository\StoreSectionCardRepository;
 use App\Repository\StoreSectionRepository;
-use App\Service\Catalog\CatalogCardResolver;
+use App\Service\CaseCards\ColorIdentityParser;
+use App\Service\CaseCards\SectionAutoFiller;
+use App\Service\CaseCards\SectionSerializer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -19,37 +25,42 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 /**
- * "Case Cards" sections — named, ordered groups of a store's inventory listings
- * shown on the store's public Case Cards page.
+ * Case sections — the labeled areas inside a store's display cases ("Black",
+ * "Rares $20+"). Each section is its own trackable inventory pool: cards carry
+ * an allocated quantity and a sold count, filled manually or by an auto-fill
+ * whose filters cover price, rarity, set, card type, and smart color-identity
+ * terms ("Azorius", "mono black", "five-color").
  *
- * The GET collection is public (it backs the storefront page). Every mutating
- * route is gated on STORE_MANAGE, so only the store owner (or a super-admin)
- * can create, edit, fill, or delete a section.
+ * The GET list is public (storefront); every mutation and the pull sheet are
+ * gated on STORE_MANAGE. Case-level CRUD lives in StoreCaseController.
  */
 #[Route('/api/stores/{slug}/sections')]
 final class StoreSectionController extends AbstractController
 {
-    /** Upper bound on rows a single "Pull from inventory" click materialises. */
+    /** Upper bound on listings a single "Pull from inventory" click materialises. */
     private const AUTO_FILL_MAX = 60;
 
     /** Rarities the auto-fill filter accepts (matched case-insensitively). */
     private const ALLOWED_RARITIES = ['common', 'uncommon', 'rare', 'mythic', 'special', 'bonus'];
 
+    /** Order statuses whose case cards still need to be pulled from the case. */
+    private const PULL_OPEN_STATUSES = [OrderStatus::PENDING, OrderStatus::RECEIVED, OrderStatus::PAID];
+
     public function __construct(
         private readonly StoreRepository $storeRepository,
+        private readonly StoreCaseRepository $caseRepository,
         private readonly StoreSectionRepository $sectionRepository,
         private readonly StoreSectionCardRepository $sectionCardRepository,
         private readonly InventoryItemRepository $inventoryItemRepository,
-        private readonly CatalogCardResolver $catalogCardResolver,
+        private readonly OrderLineRepository $orderLineRepository,
+        private readonly SectionAutoFiller $autoFiller,
+        private readonly SectionSerializer $serializer,
+        private readonly ColorIdentityParser $colorIdentityParser,
         private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
-    /**
-     * Public: all of a store's sections with their cards, for the storefront
-     * Case Cards page. Empty sections are included so the owner can see the
-     * scaffolding they've created even before filling it.
-     */
+    /** Public: all of a store's sections (flat). The storefront's grouped view uses GET /cases. */
     #[Route('', name: 'api_store_sections_list', methods: ['GET'])]
     public function list(string $slug): JsonResponse
     {
@@ -59,7 +70,7 @@ final class StoreSectionController extends AbstractController
         }
 
         return $this->json(array_map(
-            $this->serializeSection(...),
+            $this->serializer->serializeSection(...),
             $this->sectionRepository->findForStore($store),
         ));
     }
@@ -83,9 +94,15 @@ final class StoreSectionController extends AbstractController
             return $this->json(['detail' => 'A section title is required.'], 422);
         }
 
+        $case = $this->caseRepository->findOneForStore($store, (int) ($payload['caseId'] ?? 0));
+        if (!$case instanceof StoreCase) {
+            return $this->json(['detail' => 'A valid caseId is required — create a display case first.'], 422);
+        }
+
         $section = new StoreSection();
         $section->setStore($store);
-        $section->setTitle($this->truncate($title, 120));
+        $section->setStoreCase($case);
+        $section->setTitle(mb_substr($title, 0, 120));
         $section->setPosition($this->sectionRepository->nextPosition($store));
 
         $error = $this->applySettings($section, $payload);
@@ -96,7 +113,7 @@ final class StoreSectionController extends AbstractController
         $this->entityManager->persist($section);
         $this->entityManager->flush();
 
-        return $this->json($this->serializeSection($section), 201);
+        return $this->json($this->serializer->serializeSection($section), 201);
     }
 
     #[Route('/{id}', name: 'api_store_sections_update', methods: ['PATCH'])]
@@ -118,7 +135,18 @@ final class StoreSectionController extends AbstractController
             if ('' === $title) {
                 return $this->json(['detail' => 'A section title cannot be empty.'], 422);
             }
-            $section->setTitle($this->truncate($title, 120));
+            $section->setTitle(mb_substr($title, 0, 120));
+        }
+
+        if (array_key_exists('caseId', $payload)) {
+            $store = $section->getStore();
+            $case = $store instanceof Store
+                ? $this->caseRepository->findOneForStore($store, (int) $payload['caseId'])
+                : null;
+            if (!$case instanceof StoreCase) {
+                return $this->json(['detail' => 'caseId does not reference one of this store\'s cases.'], 422);
+            }
+            $section->setStoreCase($case);
         }
 
         $error = $this->applySettings($section, $payload);
@@ -128,7 +156,7 @@ final class StoreSectionController extends AbstractController
 
         $this->entityManager->flush();
 
-        return $this->json($this->serializeSection($section));
+        return $this->json($this->serializer->serializeSection($section));
     }
 
     #[Route('/{id}', name: 'api_store_sections_delete', methods: ['DELETE'])]
@@ -147,9 +175,10 @@ final class StoreSectionController extends AbstractController
     }
 
     /**
-     * Manual fill: append one or more of the store's inventory listings to the
-     * section. Listings already in the section (or not belonging to the store)
-     * are skipped silently, so the client can re-send a selection idempotently.
+     * Manual fill: append the store's inventory listings to the section's
+     * pool. Listings already in the section (or not belonging to this store)
+     * are skipped silently, so a selection can be re-sent idempotently.
+     * Optional "quantity" (default 1) sets the pool size of newly added rows.
      */
     #[Route('/{id}/items', name: 'api_store_sections_add_items', methods: ['POST'])]
     #[IsGranted('ROLE_USER')]
@@ -171,6 +200,8 @@ final class StoreSectionController extends AbstractController
             return $this->json(['detail' => 'Provide inventoryItemId or a non-empty inventoryItemIds array.'], 422);
         }
 
+        $poolQuantity = max(1, (int) (is_array($payload) ? ($payload['quantity'] ?? 1) : 1));
+
         $existing = $this->existingInventoryItemIds($section);
         $position = $this->sectionCardRepository->nextPosition($section);
         $added = 0;
@@ -185,7 +216,7 @@ final class StoreSectionController extends AbstractController
                 continue;
             }
 
-            $section->addCard($this->makeCard($item, $position++));
+            $section->addCard($this->makeCard($item, $position++, $poolQuantity));
             $existing[$itemId] = true;
             ++$added;
         }
@@ -195,7 +226,34 @@ final class StoreSectionController extends AbstractController
             $this->entityManager->refresh($section);
         }
 
-        return $this->json($this->serializeSection($section));
+        return $this->json($this->serializer->serializeSection($section));
+    }
+
+    /** Adjust a section card's pool size. Clamped to at least its sold count. */
+    #[Route('/{id}/items/{cardId}', name: 'api_store_sections_update_item', methods: ['PATCH'])]
+    #[IsGranted('ROLE_USER')]
+    public function updateItem(Request $request, string $slug, int $id, int $cardId): JsonResponse
+    {
+        $section = $this->findManagedSection($slug, $id);
+        if (!$section instanceof StoreSection) {
+            return $this->json(['detail' => 'Section not found.'], 404);
+        }
+
+        $payload = $this->decodeBody($request);
+        if (!is_array($payload) || !array_key_exists('quantity', $payload)) {
+            return $this->json(['detail' => 'Request body must include quantity.'], 422);
+        }
+
+        foreach ($section->getCards() as $card) {
+            if ($card->getId() === $cardId) {
+                // Never shrink below what's already sold — history must stay consistent.
+                $card->setQuantity(max($card->getSoldQuantity(), (int) $payload['quantity']));
+                $this->entityManager->flush();
+                break;
+            }
+        }
+
+        return $this->json($this->serializer->serializeSection($section));
     }
 
     #[Route('/{id}/items/{cardId}', name: 'api_store_sections_remove_item', methods: ['DELETE'])]
@@ -217,14 +275,20 @@ final class StoreSectionController extends AbstractController
 
         $this->entityManager->refresh($section);
 
-        return $this->json($this->serializeSection($section));
+        return $this->json($this->serializer->serializeSection($section));
     }
 
     /**
-     * Auto fill: replace the section's contents with the store's inventory
-     * listings matching the (optionally updated) price range + rarity. This is
-     * the "Pull from inventory" button — a one-shot materialisation, re-runnable
-     * to refresh. The resulting rows stay editable afterwards.
+     * Auto fill — the "Pull from inventory" button. Picks up to AUTO_FILL_MAX
+     * listings matching the section's filters (price, rarity, set, type, color
+     * identity), skipping stock already claimed by the store's other sections,
+     * and merges them into the pool:
+     *
+     *  - matching listings already in the section keep their pool counts;
+     *  - new matches are added with one allocated copy (one display slot);
+     *  - stale rows with sales are kept but frozen (pool = sold) so pending
+     *    pull sheets and history stay intact;
+     *  - stale rows with no sales are removed.
      */
     #[Route('/{id}/auto-fill', name: 'api_store_sections_auto_fill', methods: ['POST'])]
     #[IsGranted('ROLE_USER')]
@@ -233,11 +297,6 @@ final class StoreSectionController extends AbstractController
         $section = $this->findManagedSection($slug, $id);
         if (!$section instanceof StoreSection) {
             return $this->json(['detail' => 'Section not found.'], 404);
-        }
-
-        $store = $section->getStore();
-        if (!$store instanceof Store) {
-            return $this->json(['detail' => 'Section is not attached to a store.'], 409);
         }
 
         $payload = $this->decodeBody($request);
@@ -256,31 +315,98 @@ final class StoreSectionController extends AbstractController
             return $this->json(['detail' => 'Minimum price cannot exceed maximum price.'], 422);
         }
 
-        $matches = $this->inventoryItemRepository->findForAutoSection(
-            $store,
-            $min,
-            $max,
-            $section->getAutoRarity(),
-            self::AUTO_FILL_MAX,
-        );
+        $picked = $this->autoFiller->pickListings($section, self::AUTO_FILL_MAX);
 
-        $section->clearCards();
-        $this->entityManager->flush();
+        /** @var array<int, StoreSectionCard> $existingByItem */
+        $existingByItem = [];
+        foreach ($section->getCards() as $card) {
+            $itemId = $card->getInventoryItem()?->getId();
+            if (null !== $itemId) {
+                $existingByItem[$itemId] = $card;
+            }
+        }
 
         $position = 0;
-        foreach ($matches as $item) {
-            $section->addCard($this->makeCard($item, $position++));
+        $keptItemIds = [];
+        foreach ($picked as $item) {
+            $itemId = (int) $item->getId();
+            $keptItemIds[$itemId] = true;
+            if (isset($existingByItem[$itemId])) {
+                $existingByItem[$itemId]->setPosition($position++);
+            } else {
+                $section->addCard($this->makeCard($item, $position++, 1));
+            }
         }
+
+        foreach ($existingByItem as $itemId => $card) {
+            if (isset($keptItemIds[$itemId])) {
+                continue;
+            }
+            if ($card->getSoldQuantity() > 0) {
+                // Sold-from rows stay for pull sheets/history but stop selling.
+                $card->setQuantity($card->getSoldQuantity());
+                $card->setPosition($position++);
+            } else {
+                $section->removeCard($card);
+            }
+        }
+
         $this->entityManager->flush();
         $this->entityManager->refresh($section);
 
-        return $this->json($this->serializeSection($section));
+        return $this->json($this->serializer->serializeSection($section));
     }
 
     /**
-     * Apply the settable fields common to create/update/auto-fill: mode and the
-     * three auto-criteria columns. Returns an error string on invalid input, or
-     * null on success. Only keys actually present in the payload are touched.
+     * Pull sheet: every case card in open orders (placed but not yet
+     * fulfilled/shipped/cancelled) that staff must pull from this section.
+     * Reflects the live order lifecycle — fulfilling, cancelling, or
+     * refunding an order drops its lines off the sheet.
+     */
+    #[Route('/{id}/pull-sheet', name: 'api_store_sections_pull_sheet', methods: ['GET'])]
+    #[IsGranted('ROLE_USER')]
+    public function pullSheet(string $slug, int $id): JsonResponse
+    {
+        $section = $this->findManagedSection($slug, $id);
+        if (!$section instanceof StoreSection) {
+            return $this->json(['detail' => 'Section not found.'], 404);
+        }
+
+        $lines = $this->orderLineRepository->findOpenPullLinesForSection($section, self::PULL_OPEN_STATUSES);
+
+        $rows = [];
+        $totalCards = 0;
+        foreach ($lines as $line) {
+            $order = $line->getParentOrder();
+            $card = $line->getCard();
+            $totalCards += $line->getCaseQuantity();
+            $rows[] = [
+                'lineId' => $line->getId(),
+                'cardName' => $line->getCardName(),
+                'setCode' => $card?->getSetCode(),
+                'collectorNumber' => $card?->getCollectorNumber(),
+                'quantity' => $line->getCaseQuantity(),
+                'orderReference' => $order?->getReference(),
+                'orderStatus' => $order?->getStatus()->value,
+                'customerName' => $order?->getCustomerName(),
+                'customerEmail' => $order?->getCustomerEmail(),
+                'orderedAt' => $order?->getCreatedAt()->format(DATE_ATOM),
+            ];
+        }
+
+        return $this->json([
+            'caseName' => $section->getStoreCase()?->getName(),
+            'sectionTitle' => $section->getTitle(),
+            'generatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'totalCards' => $totalCards,
+            'rows' => $rows,
+        ]);
+    }
+
+    /**
+     * Apply the settable fields common to create/update/auto-fill: mode and
+     * the auto-fill criteria. Returns an error string on invalid input, null
+     * on success. Only keys present in the payload are touched.
      */
     private function applySettings(StoreSection $section, array $payload): ?string
     {
@@ -319,6 +445,38 @@ final class StoreSectionController extends AbstractController
                 }
                 $section->setAutoRarity($rarity);
             }
+        }
+
+        if (array_key_exists('autoColorIdentity', $payload)) {
+            $raw = $payload['autoColorIdentity'];
+            if (null === $raw || '' === trim((string) $raw)) {
+                $section->setAutoColorIdentity(null);
+            } else {
+                $code = $this->colorIdentityParser->parse((string) $raw);
+                if (null === $code) {
+                    return sprintf(
+                        'Unrecognized color filter "%s". Try a color (Black), a guild/shard/wedge (Azorius, Esper, Abzan), letters (UB, WUBRG), Colorless, Multicolor, or Five-Color.',
+                        trim((string) $raw),
+                    );
+                }
+                $section->setAutoColorIdentity($code);
+            }
+        }
+
+        if (array_key_exists('autoSetCode', $payload)) {
+            $raw = strtolower(trim((string) ($payload['autoSetCode'] ?? '')));
+            if ('' === $raw) {
+                $section->setAutoSetCode(null);
+            } elseif (1 !== preg_match('/^[a-z0-9]{2,10}$/', $raw)) {
+                return 'autoSetCode must be a set code like "neo" or "mh2".';
+            } else {
+                $section->setAutoSetCode($raw);
+            }
+        }
+
+        if (array_key_exists('autoCardType', $payload)) {
+            $raw = trim((string) ($payload['autoCardType'] ?? ''));
+            $section->setAutoCardType('' === $raw ? null : mb_substr($raw, 0, 40));
         }
 
         return null;
@@ -386,11 +544,12 @@ final class StoreSectionController extends AbstractController
         return $ids;
     }
 
-    private function makeCard(InventoryItem $item, int $position): StoreSectionCard
+    private function makeCard(InventoryItem $item, int $position, int $poolQuantity): StoreSectionCard
     {
         $card = new StoreSectionCard();
         $card->setInventoryItem($item);
         $card->setPosition($position);
+        $card->setQuantity($poolQuantity);
 
         return $card;
     }
@@ -425,52 +584,5 @@ final class StoreSectionController extends AbstractController
         }
 
         return json_decode($content, true);
-    }
-
-    private function truncate(string $value, int $maxLength): string
-    {
-        return strlen($value) > $maxLength ? substr($value, 0, $maxLength) : $value;
-    }
-
-    private function serializeSection(StoreSection $section): array
-    {
-        $cards = [];
-        foreach ($section->getCards() as $card) {
-            $item = $card->getInventoryItem();
-            if (!$item instanceof InventoryItem) {
-                continue;
-            }
-            $cards[] = [
-                'id' => $card->getId(),
-                'position' => $card->getPosition(),
-                'inventoryItem' => $this->serializeInventoryItem($item),
-            ];
-        }
-
-        return [
-            'id' => $section->getId(),
-            'title' => $section->getTitle(),
-            'position' => $section->getPosition(),
-            'mode' => $section->getMode(),
-            'autoMinPriceCents' => $section->getAutoMinPriceCents(),
-            'autoMaxPriceCents' => $section->getAutoMaxPriceCents(),
-            'autoRarity' => $section->getAutoRarity(),
-            'createdAt' => $section->getCreatedAt()->format(DATE_ATOM),
-            'cards' => $cards,
-        ];
-    }
-
-    private function serializeInventoryItem(InventoryItem $item): array
-    {
-        $card = $item->getCard();
-
-        return [
-            'id' => $item->getId(),
-            'priceCents' => $item->getPriceCents(),
-            'quantity' => $item->getQuantity(),
-            'condition' => $item->getCondition()->value,
-            'isFoil' => $item->isFoil(),
-            'card' => null !== $card ? $this->catalogCardResolver->serializeCard($card) : null,
-        ];
     }
 }

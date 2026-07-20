@@ -200,10 +200,16 @@ export interface InventoryItem {
 
 export type StoreSectionMode = 'manual' | 'auto'
 
-/** One inventory listing placed in a Case Cards section (public shape). */
+/** One inventory listing in a case section, with its own pool accounting. */
 export interface StoreSectionCard {
   id: number
   position: number
+  /** Copies allocated to this section's pool. */
+  quantity: number
+  /** Copies sold out of the pool. */
+  soldQuantity: number
+  /** Copies the section can still sell (quantity - sold). */
+  remaining: number
   inventoryItem: {
     id: number
     priceCents: number
@@ -214,17 +220,57 @@ export interface StoreSectionCard {
   }
 }
 
-/** A "Case Cards" section on a store's public Case Cards page. */
+/** A labeled section inside a display case — its own trackable inventory pool. */
 export interface StoreSection {
   id: number
+  case: { id: number; name: string } | null
   title: string
   position: number
   mode: StoreSectionMode
   autoMinPriceCents: number | null
   autoMaxPriceCents: number | null
   autoRarity: string | null
+  /** Canonical color-identity code ("WU", "C", "M", …). */
+  autoColorIdentity: string | null
+  /** Human label for the code ("Azorius (WU)"). */
+  autoColorIdentityLabel: string | null
+  autoSetCode: string | null
+  autoCardType: string | null
+  /** Total copies still sellable across the section's pool. */
+  availableQuantity: number
   createdAt: string
   cards: StoreSectionCard[]
+}
+
+/** A physical display case: a named group of sections. */
+export interface StoreCaseSummary {
+  id: number
+  name: string
+  position: number
+  createdAt: string
+  sections: StoreSection[]
+}
+
+/** One row of a section's pull sheet: a case card staff must pull. */
+export interface PullSheetRow {
+  lineId: number
+  cardName: string
+  setCode: string | null
+  collectorNumber: string | null
+  quantity: number
+  orderReference: string | null
+  orderStatus: string | null
+  customerName: string | null
+  customerEmail: string | null
+  orderedAt: string | null
+}
+
+export interface PullSheet {
+  caseName: string | null
+  sectionTitle: string
+  generatedAt: string
+  totalCards: number
+  rows: PullSheetRow[]
 }
 
 export interface StoreCustomer {
@@ -351,6 +397,11 @@ export interface OrderLine {
   cardName: string
   quantity: number
   priceCents: number
+  /** Set when (part of) the line sold out of a display-case section. */
+  caseName?: string | null
+  sectionTitle?: string | null
+  /** How many of the line's copies staff pull from the case (0 = none). */
+  caseQuantity?: number
   imageUrl?: string | null
   imageUris?: {
     normal?: string

@@ -74,18 +74,22 @@ class InventoryItemRepository extends ServiceEntityRepository
     }
 
     /**
-     * Inventory listings matching a case section's auto criteria — in stock,
-     * within an optional price range, of an optional rarity — highest price
-     * first. Used by the "Pull from inventory" action to materialise an auto
-     * section.
+     * One page of candidate listings for a case section's auto-fill — in
+     * stock, matching the SQL-expressible criteria (price range, rarity, set,
+     * card type), highest price first. Color identity lives in a JSON column,
+     * so SectionAutoFiller filters it in PHP over these batches (along with
+     * cross-section allocation accounting) until it has enough matches.
      *
      * @return list<InventoryItem>
      */
-    public function findForAutoSection(
+    public function findAutoSectionCandidates(
         Store $store,
         ?int $minPriceCents,
         ?int $maxPriceCents,
         ?string $rarity,
+        ?string $setCode,
+        ?string $cardType,
+        int $offset,
         int $limit,
     ): array {
         $qb = $this->createQueryBuilder('i')
@@ -96,6 +100,7 @@ class InventoryItemRepository extends ServiceEntityRepository
             ->setParameter('store', $store)
             ->orderBy('i.priceCents', 'DESC')
             ->addOrderBy('i.id', 'ASC')
+            ->setFirstResult($offset)
             ->setMaxResults($limit);
 
         if (null !== $minPriceCents) {
@@ -106,6 +111,12 @@ class InventoryItemRepository extends ServiceEntityRepository
         }
         if (null !== $rarity && '' !== $rarity) {
             $qb->andWhere('LOWER(c.rarity) = :rarity')->setParameter('rarity', strtolower($rarity));
+        }
+        if (null !== $setCode && '' !== $setCode) {
+            $qb->andWhere('LOWER(c.setCode) = :setCode')->setParameter('setCode', strtolower($setCode));
+        }
+        if (null !== $cardType && '' !== $cardType) {
+            $qb->andWhere('LOWER(c.typeLine) LIKE :cardType')->setParameter('cardType', '%'.strtolower($cardType).'%');
         }
 
         return $qb->getQuery()->getResult();

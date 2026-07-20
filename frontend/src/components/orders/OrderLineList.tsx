@@ -45,6 +45,12 @@ export function OrderLineList({
                 <p className="text-xs text-fg-muted">
                   {line.setCode ? `${line.setCode.toUpperCase()} · ` : ''}Qty {line.quantity} x {formatPrice(line.priceCents)}
                 </p>
+                {(line.caseQuantity ?? 0) > 0 && (
+                  <p className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide text-brand-700">
+                    Case card · {line.caseName ?? 'Case'} / {line.sectionTitle ?? 'Section'}
+                    {(line.caseQuantity ?? 0) < line.quantity ? ` (${line.caseQuantity} of ${line.quantity})` : ''}
+                  </p>
+                )}
               </div>
             </div>
             <p className="shrink-0 text-sm font-bold text-fg">{formatPrice(line.quantity * line.priceCents)}</p>
