@@ -31,6 +31,23 @@ class StoreSectionCard
     #[ORM\Column]
     private int $position = 0;
 
+    /**
+     * Copies of this listing physically allocated to the section — the
+     * section's own inventory pool for this card (default 1: one display-case
+     * slot). Independent of the listing's total stock.
+     */
+    #[ORM\Column(options: ['default' => 1])]
+    private int $quantity = 1;
+
+    /**
+     * Copies sold out of this section's pool (incremented at order placement,
+     * decremented when an order is cancelled/refunded). remaining() is what
+     * the storefront can still sell "from the case"; sales beyond it fall
+     * back to regular inventory, so the pool can never be oversold.
+     */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $soldQuantity = 0;
+
     public function getId(): ?int { return $this->id; }
 
     public function getSection(): ?StoreSection { return $this->section; }
@@ -41,4 +58,16 @@ class StoreSectionCard
 
     public function getPosition(): int { return $this->position; }
     public function setPosition(int $position): static { $this->position = $position; return $this; }
+
+    public function getQuantity(): int { return $this->quantity; }
+    public function setQuantity(int $quantity): static { $this->quantity = max(0, $quantity); return $this; }
+
+    public function getSoldQuantity(): int { return $this->soldQuantity; }
+    public function setSoldQuantity(int $soldQuantity): static { $this->soldQuantity = max(0, $soldQuantity); return $this; }
+
+    /** Copies still available to sell from this section's pool. */
+    public function remaining(): int
+    {
+        return max(0, $this->quantity - $this->soldQuantity);
+    }
 }

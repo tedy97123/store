@@ -3,6 +3,7 @@
 namespace App\Tests\Controller;
 
 use App\Entity\Store;
+use App\Entity\StoreCase;
 use App\Entity\StoreSection;
 use App\Entity\User;
 use App\Tests\Support\CatalogFixtures;
@@ -11,9 +12,11 @@ use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 /**
- * Case Cards sections: an owner can create sections, fill them manually or by
- * pulling from inventory (price range + rarity), and the public page can read
- * them — while a non-owner is locked out of every mutation.
+ * Case Cards v2: owners manage display cases and their sections, fill them
+ * manually or via smart-filtered auto-fill (color identity terms, set, card
+ * type, price, rarity), each section acting as its own inventory pool — while
+ * the public storefront reads everything anonymously and non-owners are
+ * locked out of every mutation.
  */
 final class StoreSectionControllerTest extends WebTestCase
 {
@@ -46,7 +49,7 @@ final class StoreSectionControllerTest extends WebTestCase
         $this->bearer = null;
     }
 
-    private function jsonRequest(string $method, string $url, array $body = null): array
+    private function jsonRequest(string $method, string $url, ?array $body = null): array
     {
         $server = ['CONTENT_TYPE' => 'application/json'];
         if (null !== $this->bearer) {
@@ -65,201 +68,225 @@ final class StoreSectionControllerTest extends WebTestCase
         return '' === $raw ? [] : (json_decode($raw, true) ?? []);
     }
 
-    public function testOwnerCreatesSection(): void
+    public function testCaseCrud(): void
     {
         $store = $this->fixtures->store();
+        $this->authenticate($store->getOwner());
+
+        $created = $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/cases", ['name' => 'Front Counter']);
+        self::assertSame(201, $this->client->getResponse()->getStatusCode());
+        self::assertSame('Front Counter', $created['name']);
+        self::assertSame([], $created['sections']);
+
+        $renamed = $this->jsonRequest('PATCH', "/api/stores/{$store->getSlug()}/cases/{$created['id']}", ['name' => 'Wall Case']);
+        self::assertSame('Wall Case', $renamed['name']);
+
+        $this->jsonRequest('DELETE', "/api/stores/{$store->getSlug()}/cases/{$created['id']}");
+        self::assertSame(204, $this->client->getResponse()->getStatusCode());
+    }
+
+    public function testSectionRequiresCase(): void
+    {
+        $store = $this->fixtures->store();
+        $this->authenticate($store->getOwner());
+
+        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", ['title' => 'No case']);
+        self::assertSame(422, $this->client->getResponse()->getStatusCode());
+    }
+
+    public function testOwnerCreatesSectionInCase(): void
+    {
+        $store = $this->fixtures->store();
+        $case = $this->fixtures->storeCase($store, 'Main Case');
         $this->authenticate($store->getOwner());
 
         $body = $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", [
             'title' => 'Vintage Power',
             'mode' => 'manual',
+            'caseId' => $case->getId(),
         ]);
 
         self::assertSame(201, $this->client->getResponse()->getStatusCode());
         self::assertSame('Vintage Power', $body['title']);
-        self::assertSame('manual', $body['mode']);
-        self::assertSame([], $body['cards']);
-        self::assertIsInt($body['id']);
+        self::assertSame('Main Case', $body['case']['name']);
+        self::assertSame(0, $body['availableQuantity']);
     }
 
-    public function testCreateSectionRequiresTitle(): void
+    public function testManualAddTracksPool(): void
     {
         $store = $this->fixtures->store();
+        $case = $this->fixtures->storeCase($store);
+        $item = $this->fixtures->inventoryItem($store, $this->fixtures->card(101), 4);
         $this->authenticate($store->getOwner());
+        $section = $this->createSection($store, $case, 'Manual');
 
-        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", ['title' => '  ']);
+        $body = $this->jsonRequest(
+            'POST',
+            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items",
+            ['inventoryItemId' => $item->getId(), 'quantity' => 2],
+        );
+        self::assertResponseIsSuccessful();
+        self::assertCount(1, $body['cards']);
+        self::assertSame(2, $body['cards'][0]['quantity']);
+        self::assertSame(0, $body['cards'][0]['soldQuantity']);
+        self::assertSame(2, $body['cards'][0]['remaining']);
+        self::assertSame(2, $body['availableQuantity']);
+
+        // Pool size is editable, clamped at the sold count (0 here).
+        $cardId = $body['cards'][0]['id'];
+        $body = $this->jsonRequest(
+            'PATCH',
+            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items/{$cardId}",
+            ['quantity' => 3],
+        );
+        self::assertSame(3, $body['cards'][0]['quantity']);
+    }
+
+    public function testAutoFillByColorIdentityTerm(): void
+    {
+        $store = $this->fixtures->store();
+        $case = $this->fixtures->storeCase($store);
+        // A mono-black card, an Azorius (WU) card, and a colorless card.
+        $this->fixtures->inventoryItem($store, $this->fixtures->card(201, ['color_identity' => ['B']]), 1, priceCents: 500);
+        $azorius = $this->fixtures->inventoryItem($store, $this->fixtures->card(202, ['color_identity' => ['W', 'U']]), 1, priceCents: 700);
+        $this->fixtures->inventoryItem($store, $this->fixtures->card(203, ['color_identity' => []]), 1, priceCents: 900);
+        $this->authenticate($store->getOwner());
+        $section = $this->createSection($store, $case, 'Azorius', StoreSection::MODE_AUTO);
+
+        $body = $this->jsonRequest(
+            'POST',
+            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
+            ['autoColorIdentity' => 'Azorius'],
+        );
+
+        self::assertResponseIsSuccessful();
+        self::assertCount(1, $body['cards']);
+        self::assertSame($azorius->getId(), $body['cards'][0]['inventoryItem']['id']);
+        self::assertSame('WU', $body['autoColorIdentity']);
+        self::assertSame('Azorius (WU)', $body['autoColorIdentityLabel']);
+        self::assertSame(1, $body['cards'][0]['quantity']);
+    }
+
+    public function testAutoFillBySetAndCardType(): void
+    {
+        $store = $this->fixtures->store();
+        $case = $this->fixtures->storeCase($store);
+        $neoCreature = $this->fixtures->inventoryItem(
+            $store,
+            $this->fixtures->card(301, ['set' => 'neo', 'type_line' => 'Legendary Creature — Dragon']),
+            1,
+        );
+        $this->fixtures->inventoryItem(
+            $store,
+            $this->fixtures->card(302, ['set' => 'neo', 'type_line' => 'Instant']),
+            1,
+        );
+        $this->fixtures->inventoryItem(
+            $store,
+            $this->fixtures->card(303, ['set' => 'mh2', 'type_line' => 'Creature — Elf']),
+            1,
+        );
+        $this->authenticate($store->getOwner());
+        $section = $this->createSection($store, $case, 'NEO creatures', StoreSection::MODE_AUTO);
+
+        $body = $this->jsonRequest(
+            'POST',
+            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
+            ['autoSetCode' => 'NEO', 'autoCardType' => 'Creature'],
+        );
+
+        self::assertResponseIsSuccessful();
+        self::assertCount(1, $body['cards']);
+        self::assertSame($neoCreature->getId(), $body['cards'][0]['inventoryItem']['id']);
+    }
+
+    public function testAutoFillRejectsUnknownColorTerm(): void
+    {
+        $store = $this->fixtures->store();
+        $case = $this->fixtures->storeCase($store);
+        $this->authenticate($store->getOwner());
+        $section = $this->createSection($store, $case, 'Bad', StoreSection::MODE_AUTO);
+
+        $body = $this->jsonRequest(
+            'POST',
+            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
+            ['autoColorIdentity' => 'purple'],
+        );
 
         self::assertSame(422, $this->client->getResponse()->getStatusCode());
+        self::assertStringContainsString('purple', $body['detail']);
     }
 
-    public function testManualAddAndRemoveItem(): void
+    public function testAutoFillSkipsStockClaimedByOtherSections(): void
     {
         $store = $this->fixtures->store();
-        $card = $this->fixtures->card(101);
-        $item = $this->fixtures->inventoryItem($store, $card, 3);
+        $case = $this->fixtures->storeCase($store);
+        // Single copy in stock, already claimed by section A's pool.
+        $item = $this->fixtures->inventoryItem($store, $this->fixtures->card(401, ['rarity' => 'rare']), 1);
         $this->authenticate($store->getOwner());
-
-        $section = $this->createSection($store, 'Manual');
-
-        // Add the listing.
-        $body = $this->jsonRequest(
+        $sectionA = $this->createSection($store, $case, 'A');
+        $this->jsonRequest(
             'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items",
+            "/api/stores/{$store->getSlug()}/sections/{$sectionA->getId()}/items",
             ['inventoryItemId' => $item->getId()],
         );
-        self::assertResponseIsSuccessful();
-        self::assertCount(1, $body['cards']);
-        self::assertSame($item->getId(), $body['cards'][0]['inventoryItem']['id']);
-        $sectionCardId = $body['cards'][0]['id'];
 
-        // Re-adding the same listing is a no-op (idempotent).
+        $sectionB = $this->createSection($store, $case, 'B', StoreSection::MODE_AUTO);
         $body = $this->jsonRequest(
             'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items",
-            ['inventoryItemIds' => [$item->getId()]],
-        );
-        self::assertCount(1, $body['cards']);
-
-        // Remove it.
-        $body = $this->jsonRequest(
-            'DELETE',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items/{$sectionCardId}",
-        );
-        self::assertResponseIsSuccessful();
-        self::assertCount(0, $body['cards']);
-    }
-
-    public function testAddItemFromAnotherStoreIsIgnored(): void
-    {
-        $store = $this->fixtures->store();
-        $other = $this->fixtures->store();
-        $card = $this->fixtures->card(102);
-        $foreignItem = $this->fixtures->inventoryItem($other, $card, 1);
-        $this->authenticate($store->getOwner());
-
-        $section = $this->createSection($store, 'Manual');
-
-        $body = $this->jsonRequest(
-            'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items",
-            ['inventoryItemId' => $foreignItem->getId()],
-        );
-
-        self::assertResponseIsSuccessful();
-        self::assertCount(0, $body['cards']);
-    }
-
-    public function testAutoFillPullsByPriceAndRarity(): void
-    {
-        $store = $this->fixtures->store();
-        // Three listings: a cheap common, a mid rare, and an expensive mythic.
-        $cheap = $this->fixtures->inventoryItem($store, $this->fixtures->card(201, ['rarity' => 'common']), 1, priceCents: 200);
-        $mid = $this->fixtures->inventoryItem($store, $this->fixtures->card(202, ['rarity' => 'rare']), 1, priceCents: 2500);
-        $pricey = $this->fixtures->inventoryItem($store, $this->fixtures->card(203, ['rarity' => 'mythic']), 1, priceCents: 9000);
-        $this->authenticate($store->getOwner());
-
-        $section = $this->createSection($store, 'Rares $10–$50', StoreSection::MODE_AUTO);
-
-        $body = $this->jsonRequest(
-            'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
-            ['autoMinPriceCents' => 1000, 'autoMaxPriceCents' => 5000, 'autoRarity' => 'rare'],
-        );
-
-        self::assertResponseIsSuccessful();
-        self::assertCount(1, $body['cards']);
-        self::assertSame($mid->getId(), $body['cards'][0]['inventoryItem']['id']);
-        self::assertSame('auto', $body['mode']);
-        self::assertSame(1000, $body['autoMinPriceCents']);
-        self::assertSame('rare', $body['autoRarity']);
-    }
-
-    public function testAutoFillIsRepeatableAndReplacesContents(): void
-    {
-        $store = $this->fixtures->store();
-        $a = $this->fixtures->inventoryItem($store, $this->fixtures->card(301, ['rarity' => 'rare']), 1, priceCents: 1500);
-        $this->authenticate($store->getOwner());
-        $section = $this->createSection($store, 'Auto', StoreSection::MODE_AUTO);
-
-        $first = $this->jsonRequest(
-            'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
+            "/api/stores/{$store->getSlug()}/sections/{$sectionB->getId()}/auto-fill",
             ['autoRarity' => 'rare'],
         );
-        self::assertCount(1, $first['cards']);
 
-        // A second pull with the same criteria yields the same single card, not a duplicate.
-        $second = $this->jsonRequest(
-            'POST',
-            "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/auto-fill",
-        );
-        self::assertCount(1, $second['cards']);
-        self::assertSame($a->getId(), $second['cards'][0]['inventoryItem']['id']);
+        self::assertResponseIsSuccessful();
+        self::assertCount(0, $body['cards'], 'the only copy is already promised to section A');
     }
 
-    public function testPublicCanReadSectionsWithoutAuth(): void
+    public function testPublicCasesListWithoutAuth(): void
     {
         $store = $this->fixtures->store();
-        $item = $this->fixtures->inventoryItem($store, $this->fixtures->card(401), 1);
+        $case = $this->fixtures->storeCase($store, 'Public Case');
+        $item = $this->fixtures->inventoryItem($store, $this->fixtures->card(501), 1);
         $this->authenticate($store->getOwner());
-        $section = $this->createSection($store, 'Featured');
+        $section = $this->createSection($store, $case, 'Featured');
         $this->jsonRequest(
             'POST',
             "/api/stores/{$store->getSlug()}/sections/{$section->getId()}/items",
             ['inventoryItemId' => $item->getId()],
         );
 
-        // Anonymous read — no Bearer token attached.
         $this->anonymous();
-        $body = $this->jsonRequest('GET', "/api/stores/{$store->getSlug()}/sections");
+        $body = $this->jsonRequest('GET', "/api/stores/{$store->getSlug()}/cases");
         self::assertResponseIsSuccessful();
         self::assertCount(1, $body);
-        self::assertSame('Featured', $body[0]['title']);
-        self::assertCount(1, $body[0]['cards']);
+        self::assertSame('Public Case', $body[0]['name']);
+        self::assertSame('Featured', $body[0]['sections'][0]['title']);
+        self::assertCount(1, $body[0]['sections'][0]['cards']);
     }
 
     public function testNonOwnerCannotMutate(): void
     {
         $store = $this->fixtures->store();
-        $section = $this->createSectionDirect($store, 'Owned');
+        $case = $this->fixtures->storeCase($store);
         $intruder = $this->fixtures->user(['ROLE_USER']);
         $this->authenticate($intruder);
 
-        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", ['title' => 'Nope']);
+        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/cases", ['name' => 'Nope']);
         self::assertSame(403, $this->client->getResponse()->getStatusCode());
 
-        $this->jsonRequest('DELETE', "/api/stores/{$store->getSlug()}/sections/{$section->getId()}");
+        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", ['title' => 'Nope', 'caseId' => $case->getId()]);
         self::assertSame(403, $this->client->getResponse()->getStatusCode());
     }
 
-    public function testAnonymousCannotCreate(): void
-    {
-        $store = $this->fixtures->store();
-        $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", ['title' => 'Nope']);
-
-        self::assertSame(401, $this->client->getResponse()->getStatusCode());
-    }
-
-    private function createSection(Store $store, string $title, string $mode = StoreSection::MODE_MANUAL): StoreSection
+    private function createSection(Store $store, StoreCase $case, string $title, string $mode = StoreSection::MODE_MANUAL): StoreSection
     {
         $body = $this->jsonRequest('POST', "/api/stores/{$store->getSlug()}/sections", [
             'title' => $title,
             'mode' => $mode,
+            'caseId' => $case->getId(),
         ]);
         self::assertSame(201, $this->client->getResponse()->getStatusCode());
 
         return $this->em->getRepository(StoreSection::class)->find($body['id']);
-    }
-
-    private function createSectionDirect(Store $store, string $title): StoreSection
-    {
-        $section = new StoreSection();
-        $section->setStore($store);
-        $section->setTitle($title);
-        $section->setPosition(0);
-        $this->em->persist($section);
-        $this->em->flush();
-
-        return $section;
     }
 }

@@ -44,6 +44,7 @@ final class StoreCustomerController extends AbstractController
         private readonly InventoryItemRepository $inventoryRepository,
         private readonly CardRepository $cardRepository,
         private readonly OrderRepository $orderRepository,
+        private readonly \App\Service\CaseCards\SectionSaleAllocator $sectionSaleAllocator,
         private readonly EntityManagerInterface $entityManager,
         private readonly KernelInterface $kernel,
     ) {
@@ -450,9 +451,15 @@ final class StoreCustomerController extends AbstractController
             $quantity = min($cartItem->getQuantity(), $inventoryItem->getQuantity());
             $line = (new OrderLine())
                 ->setCard($inventoryItem->getCard())
+                ->setInventoryItem($inventoryItem)
                 ->setCardName($inventoryItem->getCard()?->getName() ?? 'Unknown card')
                 ->setQuantity($quantity)
                 ->setPriceCents($inventoryItem->getPriceCents());
+
+            // If this listing sits in a display-case section with pool copies
+            // left, the sale comes from the case: deplete the section pool and
+            // stamp the line with its case/section for pull + print sheets.
+            $this->sectionSaleAllocator->allocateLine($line, $inventoryItem, $quantity);
 
             $order->addLine($line);
             $total += $quantity * $inventoryItem->getPriceCents();
@@ -672,6 +679,9 @@ final class StoreCustomerController extends AbstractController
             'imageUris' => $line->getCard()?->getImageUris(),
             'setCode' => $line->getCard()?->getSetCode(),
             'collectorNumber' => $line->getCard()?->getCollectorNumber(),
+            'caseName' => $line->getCaseName(),
+            'sectionTitle' => $line->getSectionTitle(),
+            'caseQuantity' => $line->getCaseQuantity(),
         ];
     }
 

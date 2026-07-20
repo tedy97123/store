@@ -35,6 +35,29 @@ class OrderLine
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?InventoryItem $inventoryItem = null;
 
+    /**
+     * When (part of) this line was sold out of a display-case section, the
+     * section pool it depleted. SET NULL keeps history when a section is
+     * dismantled; the caseName/sectionTitle snapshots below preserve what
+     * staff need on print sheets regardless.
+     */
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?StoreSectionCard $sectionCard = null;
+
+    #[ORM\Column(length: 120, nullable: true)]
+    #[Groups(['order:read'])]
+    private ?string $caseName = null;
+
+    #[ORM\Column(length: 120, nullable: true)]
+    #[Groups(['order:read'])]
+    private ?string $sectionTitle = null;
+
+    /** How many of this line's copies come out of the case section's pool. */
+    #[ORM\Column(options: ['default' => 0])]
+    #[Groups(['order:read'])]
+    private int $caseQuantity = 0;
+
     #[ORM\Column(length: 255)]
     #[Groups(['order:read'])]
     private string $cardName = '';
@@ -86,6 +109,54 @@ class OrderLine
     public function setInventoryItem(?InventoryItem $inventoryItem): static
     {
         $this->inventoryItem = $inventoryItem;
+
+        return $this;
+    }
+
+    public function getSectionCard(): ?StoreSectionCard
+    {
+        return $this->sectionCard;
+    }
+
+    public function setSectionCard(?StoreSectionCard $sectionCard): static
+    {
+        $this->sectionCard = $sectionCard;
+
+        return $this;
+    }
+
+    public function getCaseName(): ?string
+    {
+        return $this->caseName;
+    }
+
+    public function setCaseName(?string $caseName): static
+    {
+        $this->caseName = $caseName;
+
+        return $this;
+    }
+
+    public function getSectionTitle(): ?string
+    {
+        return $this->sectionTitle;
+    }
+
+    public function setSectionTitle(?string $sectionTitle): static
+    {
+        $this->sectionTitle = $sectionTitle;
+
+        return $this;
+    }
+
+    public function getCaseQuantity(): int
+    {
+        return $this->caseQuantity;
+    }
+
+    public function setCaseQuantity(int $caseQuantity): static
+    {
+        $this->caseQuantity = max(0, $caseQuantity);
 
         return $this;
     }

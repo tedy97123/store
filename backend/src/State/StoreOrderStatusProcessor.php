@@ -11,6 +11,7 @@ use App\Entity\User;
 use App\Enum\OrderStatus;
 use App\Repository\CustomerNotificationRepository;
 use App\Repository\UserRepository;
+use App\Service\CaseCards\SectionSaleAllocator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
@@ -23,6 +24,7 @@ final readonly class StoreOrderStatusProcessor implements ProcessorInterface
         private EntityManagerInterface $entityManager,
         private UserRepository $userRepository,
         private CustomerNotificationRepository $notificationRepository,
+        private SectionSaleAllocator $sectionSaleAllocator,
         private MailerInterface $mailer,
     ) {
     }
@@ -35,11 +37,32 @@ final readonly class StoreOrderStatusProcessor implements ProcessorInterface
 
         $originalStatus = $this->entityManager->getUnitOfWork()->getOriginalEntityData($data)['status'] ?? null;
         $this->createFulfilledNotificationIfNeeded($data, $originalStatus);
+        $this->releaseCasePoolsIfNeeded($data, $originalStatus);
 
         $this->entityManager->persist($data);
         $this->entityManager->flush();
 
         return $data;
+    }
+
+    /**
+     * Entering CANCELLED/REFUNDED returns each line's case copies to its
+     * section pool, so the case's available quantity (and future auto-fills)
+     * reflect reality. Both states are terminal in the status state machine,
+     * so a pool can never be double-released.
+     */
+    private function releaseCasePoolsIfNeeded(Order $order, mixed $originalStatus): void
+    {
+        if (!$order->getStatus()->returnsStock()) {
+            return;
+        }
+        if ($originalStatus instanceof OrderStatus && $originalStatus->returnsStock()) {
+            return;
+        }
+
+        foreach ($order->getLines() as $line) {
+            $this->sectionSaleAllocator->releaseLine($line);
+        }
     }
 
     private function createFulfilledNotificationIfNeeded(Order $order, mixed $originalStatus): void
