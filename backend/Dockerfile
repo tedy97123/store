@@ -56,6 +56,17 @@ RUN { \
     } > "$PHP_INI_DIR/conf.d/app-opcache.ini" \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
+# Upload limits sized for CSV imports. The app accepts up to 10 MB / 50k rows
+# (StoreCsvImportController + CsvImportParser::MAX_ROWS); PHP's defaults
+# (upload_max_filesize=2M, post_max_size=8M) would silently drop larger uploads
+# before Symfony ever sees the file. memory_limit is raised so parsing a full
+# 50k-row file into memory doesn't exhaust the default 128M.
+RUN { \
+        echo 'upload_max_filesize=12M'; \
+        echo 'post_max_size=13M'; \
+        echo 'memory_limit=512M'; \
+    } > "$PHP_INI_DIR/conf.d/app-uploads.ini"
+
 ENV APP_ENV=prod \
     APP_DEBUG=0 \
     # FrankenPHP serves the Symfony public/ dir.
