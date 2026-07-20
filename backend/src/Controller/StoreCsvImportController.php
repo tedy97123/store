@@ -301,9 +301,11 @@ final class StoreCsvImportController extends AbstractController
         );
         $totalFailed = $this->rowRepository->count(['job' => $job, 'status' => CsvImportRow::STATUS_ERROR]);
 
+        // Normalize set names → codes before hitting Scryfall's collection
+        // endpoint: it only accepts codes, and CSVs often carry full names.
         $collectionMatches = $this->scryfallClient->fetchCollectionBySetCollectors(array_map(
-            static fn (CsvImportRow $row): array => [
-                'set' => $row->getSetCode(),
+            fn (CsvImportRow $row): array => [
+                'set' => $this->catalogCardResolver->normalizeSetCode($row->getSetCode()),
                 'collectorNumber' => $row->getCollectorNumber(),
             ],
             $rows,
@@ -615,7 +617,7 @@ final class StoreCsvImportController extends AbstractController
         $isFoil = array_key_exists('isFoil', $overrides) && null !== $overrides['isFoil'] ? (bool) $overrides['isFoil'] : $row->isFoil();
         $notes = implode("\n", array_values(array_filter([
             'Manually recovered from CSV import row #'.($row->getRowIndex() + 1).' in import #'.$job->getId(),
-            '' !== $row->getGame() ? 'Game: '.$row->getGame() : '',
+            '' !== $row->getGame() && !CsvImportRow::isMagicGame($row->getGame()) ? 'Game: '.$row->getGame() : '',
             '' !== $row->getVariant() ? 'Variant: '.$row->getVariant() : '',
         ])));
 
