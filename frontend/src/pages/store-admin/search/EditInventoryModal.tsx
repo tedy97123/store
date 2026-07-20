@@ -117,7 +117,7 @@ function EditInventoryModalBody({
         </>
       }
     >
-      <div className="space-y-8">
+      <div>
         <div className="grid gap-8 xl:grid-cols-[24rem_minmax(0,1fr)]">
           {/* Left: interactive holographic card + facts */}
           <div className="space-y-4">
@@ -196,73 +196,74 @@ function EditInventoryModalBody({
                 </p>
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Variants — spans the full modal width so cards have room to breathe */}
-        <div className="border-t border-border pt-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="font-display text-lg font-bold text-fg">Variants</h3>
-              <p className="text-xs text-fg-muted">
-                {variantSearchActive ? 'Other printings matching this name.' : 'Find other printings of this card.'}
-              </p>
-            </div>
-            <Button variant="secondary" size="sm" onClick={() => setVariantSearchActive(true)} loading={variantsLoading}>
-              <Search className="size-4" aria-hidden />
-              Find variants
-            </Button>
-          </div>
-
-          {variantSearchActive && (
-            <div className="mt-4">
-              {variantResults.length > 0 ? (
-                <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-                  {variantResults.map((card) => {
-                    const selectedVariant = editSelectedCard.id === card.id
-                    const previewFinish =
-                      card.finishes?.includes('foil') && !card.finishes.includes('nonfoil') ? 'foil' : 'nonfoil'
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        onClick={() => selectVariant(card)}
-                        className={`flex min-h-40 items-start gap-4 rounded-card border p-4 text-left transition-colors ${
-                          selectedVariant
-                            ? 'border-brand-500 bg-brand-50'
-                            : 'border-border bg-surface hover:border-brand-300'
-                        }`}
-                      >
-                        <div className="h-32 w-[5.75rem] flex-shrink-0 overflow-hidden rounded-btn border border-border bg-bg">
-                          {cardImage(card) ? (
-                            <img src={cardImage(card)} alt={card.name} className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="grid h-full place-items-center text-[0.7rem] text-fg-muted">No image</div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-display text-base font-bold leading-snug text-fg [overflow-wrap:anywhere]">{card.name}</p>
-                          <p className="mt-0.5 text-xs uppercase text-fg-muted">
-                            {card.setCode?.toUpperCase() ?? '-'} · #{card.collectorNumber ?? '-'}
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-brand-600">{formatScryfallPrice(card, previewFinish)}</p>
-                          {card.setName && <p className="mt-1 line-clamp-2 text-xs text-fg-muted">{card.setName}</p>}
-                          {card.rarity && <Badge className="mt-2 capitalize">{card.rarity}</Badge>}
-                          {selectedVariant && (
-                            <p className="mt-1 text-[0.7rem] font-semibold uppercase tracking-wide text-brand-600">
-                              Selected
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    )
-                  })}
+            {/* Variants — placed beside the card so it fills the column instead
+                of leaving a bare gap under the price field. */}
+            <div className="border-t border-border pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-base font-bold text-fg">Variants</h3>
+                  <p className="text-xs text-fg-muted">
+                    {variantSearchActive ? 'Other printings matching this name.' : 'Find other printings of this card.'}
+                  </p>
                 </div>
-              ) : (
-                !variantsLoading && <p className="text-sm text-fg-muted">No additional variants found.</p>
+                <Button variant="secondary" size="sm" onClick={() => setVariantSearchActive(true)} loading={variantsLoading}>
+                  <Search className="size-4" aria-hidden />
+                  Find variants
+                </Button>
+              </div>
+
+              {variantSearchActive && (
+                <div className="mt-4">
+                  {variantResults.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                      {variantResults.map((card) => {
+                        const selectedVariant = editSelectedCard.id === card.id
+                        const previewFinish =
+                          card.finishes?.includes('foil') && !card.finishes.includes('nonfoil') ? 'foil' : 'nonfoil'
+                        return (
+                          <button
+                            key={card.id}
+                            type="button"
+                            onClick={() => selectVariant(card)}
+                            className={`flex min-h-40 items-start gap-4 rounded-card border p-4 text-left transition-colors ${
+                              selectedVariant
+                                ? 'border-brand-500 bg-brand-50'
+                                : 'border-border bg-surface hover:border-brand-300'
+                            }`}
+                          >
+                            <div className="h-32 w-[5.75rem] flex-shrink-0 overflow-hidden rounded-btn border border-border bg-bg">
+                              {cardImage(card) ? (
+                                <img src={cardImage(card)} alt={card.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="grid h-full place-items-center text-[0.7rem] text-fg-muted">No image</div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-display text-base font-bold leading-snug text-fg [overflow-wrap:anywhere]">{card.name}</p>
+                              <p className="mt-0.5 text-xs uppercase text-fg-muted">
+                                {card.setCode?.toUpperCase() ?? '-'} · #{card.collectorNumber ?? '-'}
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-brand-600">{formatScryfallPrice(card, previewFinish)}</p>
+                              {card.setName && <p className="mt-1 line-clamp-2 text-xs text-fg-muted">{card.setName}</p>}
+                              {card.rarity && <Badge className="mt-2 capitalize">{card.rarity}</Badge>}
+                              {selectedVariant && (
+                                <p className="mt-1 text-[0.7rem] font-semibold uppercase tracking-wide text-brand-600">
+                                  Selected
+                                </p>
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    !variantsLoading && <p className="text-sm text-fg-muted">No additional variants found.</p>
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </Modal>
