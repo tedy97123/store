@@ -1,15 +1,18 @@
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, GalleryHorizontalEnd } from 'lucide-react'
+import { ArrowLeft, GalleryHorizontalEnd, Gem, Sparkles } from 'lucide-react'
+import { cardImage, formatPrice } from '../api/client'
 import { useStore, useStoreCases, useStoreTheme } from '../hooks'
 import { EmptyState, LoadingPanel, buttonVariants } from '../components/ui'
-import { SpotlightCard } from '../components/cards'
-import type { InventoryItem, StoreSectionCard } from '../api/types'
+import { InteractiveCard } from '../components/cards'
+import { rarityAccent } from '../lib/mtg'
+import type { StoreSectionCard } from '../api/types'
 
 /**
- * Storefront Case Cards page (/s/:slug/case-cards) — reached from the "Case
- * cards" quick action. Shows the store's display cases, each divided into its
- * sections, as horizontal rails of holographic tiles. Cards whose section
- * pool is sold out are hidden, as are empty sections and cases.
+ * Storefront Case Cards page (/s/:slug/case-cards). Each display case renders
+ * as a physical glass-and-brass showcase — engraved plaque, ceiling
+ * spotlights, a slow glass reflection, and lit shelves — with the store's
+ * premium singles as holographic tilt cards on the shelves. Sold-out pool
+ * cards, empty sections, and empty cases are hidden.
  */
 export default function CaseCardsPage() {
   const { slug = '' } = useParams()
@@ -32,20 +35,28 @@ export default function CaseCardsPage() {
     .filter((storeCase) => storeCase.sections.length > 0)
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-3">
+    <div className="space-y-10">
+      <div className="space-y-4">
         <Link to={`/s/${slug}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
           <ArrowLeft aria-hidden className="size-4" />
           Back to {store?.name ?? 'store'}
         </Link>
-        <div className="flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-card bg-brand-500 text-white">
-            <GalleryHorizontalEnd aria-hidden className="size-6" />
+
+        {/* Marquee header — this is the store's premium showcase. */}
+        <div className="flex flex-col items-center gap-2 py-4 text-center">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[0.7rem] font-bold uppercase tracking-[0.2em] text-fg-muted">
+            <Gem aria-hidden className="size-3.5 text-brand-500" />
+            {store?.name ?? 'Store'} showcase
           </span>
-          <div>
-            <h1 className="font-display text-2xl font-bold tracking-tight text-fg">Case cards</h1>
-            <p className="text-sm text-fg-muted">Featured singles from {store?.name ?? 'the store'}'s display cases.</p>
-          </div>
+          <h1 className="font-display text-4xl font-extrabold tracking-tight text-fg sm:text-5xl">
+            Case{' '}
+            <span className="bg-gradient-to-r from-amber-500 via-brand-500 to-purple-500 bg-clip-text text-transparent">
+              Cards
+            </span>
+          </h1>
+          <p className="max-w-xl text-sm text-fg-muted sm:text-base">
+            The singles behind the glass — hand-picked, graded, and ready to go home with you.
+          </p>
         </div>
       </div>
 
@@ -60,27 +71,44 @@ export default function CaseCardsPage() {
       ) : visibleCases.length === 0 ? (
         <EmptyState
           icon={GalleryHorizontalEnd}
-          title="No case cards yet"
+          title="The cases are being restocked"
           description="This store hasn't featured any cards in its cases yet. Check back soon."
         />
       ) : (
         <div className="space-y-12">
           {visibleCases.map((storeCase) => (
-            <section key={storeCase.id}>
-              <h2 className="mb-1 font-display text-xl font-bold tracking-tight text-fg">{storeCase.name}</h2>
-              <div className="space-y-8 border-l-2 border-border pl-4">
-                {storeCase.sections.map((section) => (
-                  <div key={section.id}>
-                    <h3 className="mb-3 font-display text-base font-bold tracking-tight text-fg-muted">
-                      {section.title}
-                    </h3>
-                    <div className="flex snap-x gap-4 overflow-x-auto pb-2">
-                      {section.cards.map((entry) => (
-                        <SpotlightCard key={entry.id} slug={slug} item={toInventoryItem(entry)} />
-                      ))}
+            <section key={storeCase.id} aria-label={`Display case: ${storeCase.name}`} className="case-frame">
+              <div className="case-interior case-spotlights case-glass px-4 pb-8 pt-5 sm:px-8">
+                {/* Engraved brass plaque */}
+                <div className="relative z-10 mb-6 flex justify-center">
+                  <span className="case-plaque inline-flex items-center gap-2 px-5 py-1.5 font-display text-sm font-bold uppercase tracking-[0.18em]">
+                    <Sparkles aria-hidden className="size-3.5" />
+                    {storeCase.name}
+                  </span>
+                </div>
+
+                <div className="relative z-10 space-y-10">
+                  {storeCase.sections.map((section) => (
+                    <div key={section.id}>
+                      <div className="mb-4 flex items-baseline justify-between gap-3">
+                        <h3 className="font-display text-xs font-bold uppercase tracking-[0.22em] text-amber-200/90">
+                          {section.title}
+                        </h3>
+                        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-zinc-500">
+                          {section.cards.length} card{section.cards.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+
+                      {/* The shelf: card rail + lit shelf edge beneath. */}
+                      <div className="flex snap-x gap-5 overflow-x-auto pb-4 pt-1">
+                        {section.cards.map((entry) => (
+                          <CaseCardTile key={entry.id} slug={slug} entry={entry} />
+                        ))}
+                      </div>
+                      <div className="case-shelf" aria-hidden />
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </section>
           ))}
@@ -94,15 +122,47 @@ type RenderableCard = StoreSectionCard & {
   inventoryItem: StoreSectionCard['inventoryItem'] & { card: NonNullable<StoreSectionCard['inventoryItem']['card']> }
 }
 
-/** Adapt the section-card's slim inventory shape to the InventoryItem SpotlightCard expects. */
-function toInventoryItem(entry: RenderableCard): InventoryItem {
+/**
+ * One card on a shelf: the holographic tilt card with a light-on-dark caption
+ * and a brass price tag. Links to the listing's details page.
+ */
+function CaseCardTile({ slug, entry }: { slug: string; entry: RenderableCard }) {
   const { inventoryItem } = entry
-  return {
-    id: inventoryItem.id,
-    quantity: inventoryItem.quantity,
-    priceCents: inventoryItem.priceCents,
-    condition: inventoryItem.condition,
-    isFoil: inventoryItem.isFoil,
-    card: inventoryItem.card,
-  }
+  const card = inventoryItem.card
+  const lastOne = entry.remaining === 1
+
+  return (
+    <Link
+      to={`/s/${slug}/cards/${inventoryItem.id}`}
+      className="group relative w-40 flex-shrink-0 snap-start sm:w-52"
+    >
+      {lastOne && (
+        <span className="absolute right-2 top-2 z-20 rounded-full bg-amber-400 px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-zinc-900 shadow">
+          Last one
+        </span>
+      )}
+      <InteractiveCard
+        image={cardImage(card)}
+        alt={card.name}
+        foil={inventoryItem.isFoil}
+        accent={rarityAccent(card.rarity)}
+        maxTilt={12}
+        shadow={false}
+      />
+      <div className="mt-3 px-0.5">
+        <h4 className="truncate font-display text-sm font-bold tracking-tight text-zinc-100 group-hover:text-amber-200">
+          {card.name}
+        </h4>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <span className="text-xs uppercase tracking-wide text-zinc-500">
+            {card.setCode?.toUpperCase() ?? '—'}
+            {inventoryItem.isFoil ? ' · Foil' : ''}
+          </span>
+          <span className="case-plaque rounded px-1.5 py-0.5 text-xs font-black">
+            {formatPrice(inventoryItem.priceCents)}
+          </span>
+        </div>
+      </div>
+    </Link>
+  )
 }
