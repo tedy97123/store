@@ -57,4 +57,34 @@ class CardRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    /** Is this a set code the local catalog knows? (case-insensitive) */
+    public function setCodeExists(string $setCode): bool
+    {
+        return null !== $this->createQueryBuilder('c')
+            ->select('1')
+            ->andWhere('LOWER(c.setCode) = :setCode')
+            ->setParameter('setCode', strtolower(trim($setCode)))
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * Resolve a full set NAME ("Adventures in the Forgotten Realms") to its
+     * code ("afr") via the local catalog, case-insensitively. Null when no set
+     * by that name is known locally.
+     */
+    public function findSetCodeByName(string $setName): ?string
+    {
+        $row = $this->createQueryBuilder('c')
+            ->select('c.setCode')
+            ->andWhere('LOWER(c.setName) = :setName')
+            ->setParameter('setName', strtolower(trim($setName)))
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+
+        return is_array($row) ? (string) $row['setCode'] : null;
+    }
 }

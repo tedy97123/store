@@ -15,6 +15,20 @@ class CsvImportRow
     public const STATUS_IMPORTED = 'imported';
     public const STATUS_ERROR = 'error';
 
+    /**
+     * Whether a CSV "game" value just says Magic — the default on this
+     * platform, so import note writers skip it instead of stamping
+     * "Game: Magic" onto every inventory listing.
+     */
+    public static function isMagicGame(string $game): bool
+    {
+        return in_array(
+            strtolower(trim($game)),
+            ['magic', 'mtg', 'magic: the gathering', 'magic the gathering'],
+            true,
+        );
+    }
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]

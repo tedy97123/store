@@ -67,6 +67,7 @@ final class CatalogFixtures
         $card->setSetCode($data['set']);
         $card->setCollectorNumber($data['collector_number']);
         $card->setRarity($data['rarity'] ?? null);
+        $card->setSetName($data['set_name'] ?? null);
         $card->setFinishes($data['finishes'] ?? null);
         $card->setPrices($data['prices'] ?? null);
         $card->setTypeLine($data['type_line'] ?? null);

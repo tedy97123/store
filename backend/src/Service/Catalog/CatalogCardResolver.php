@@ -25,6 +25,7 @@ final readonly class CatalogCardResolver
         string $rarity,
         string $finish,
     ): CatalogResolutionResult {
+        $setCode = $this->normalizeSetCode($setCode);
         $localCard = $this->matchLocal($name, $setCode, $collectorNumber, $rarity, $finish);
         if ($localCard instanceof Card) {
             return new CatalogResolutionResult($localCard);
@@ -56,6 +57,7 @@ final readonly class CatalogCardResolver
         string $finish,
         bool $allowRemoteSearch,
     ): CatalogResolutionResult {
+        $setCode = $this->normalizeSetCode($setCode);
         $localCard = $this->matchLocal($name, $setCode, $collectorNumber, $rarity, $finish);
         if ($localCard instanceof Card) {
             return new CatalogResolutionResult($localCard);
@@ -102,6 +104,36 @@ final readonly class CatalogCardResolver
         }
 
         return new CatalogResolutionResult($card);
+    }
+
+    /**
+     * CSV exports often carry the full set NAME ("Adventures in the Forgotten
+     * Realms", "Aetherdrift Commander") where we expect the set CODE ("afr",
+     * "drc") — and every matcher compares codes, so such rows fail across the
+     * board. Resolve names to codes via the local catalog: a value that isn't
+     * a known code but matches a known set name (exactly, case-insensitively)
+     * becomes that set's code. Unresolvable values pass through unchanged so
+     * remote lookups can still try them.
+     */
+    public function normalizeSetCode(string $set): string
+    {
+        $trimmed = trim($set);
+        if ('' === $trimmed) {
+            return '';
+        }
+
+        // Set codes are short and single-token; anything else is name-shaped.
+        $looksLikeCode = strlen($trimmed) <= 6 && !str_contains($trimmed, ' ');
+        if ($looksLikeCode && $this->cardRepository->setCodeExists($trimmed)) {
+            return $trimmed;
+        }
+
+        $resolved = $this->cardRepository->findSetCodeByName($trimmed);
+        if (null !== $resolved) {
+            return $resolved;
+        }
+
+        return $trimmed;
     }
 
     public function serializeCard(Card $card): array

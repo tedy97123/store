@@ -128,6 +128,25 @@ final class CsvImportRecoveryTest extends WebTestCase
         self::assertSame('Sol Ring', $body['results'][0]['card']['name']);
     }
 
+    /**
+     * Regression: CSVs that export the full set NAME ("Commander 2021")
+     * instead of the code ("c21") used to fail every match — the resolver now
+     * normalizes names to codes via the local catalog, so the preview matches.
+     */
+    public function testFailedPreviewResolvesFullSetNames(): void
+    {
+        [$job] = $this->jobWithFailedRow('Sol Ring', 'COMMANDER 2021', '263');
+        $this->fixtures->card(1, ['name' => 'Sol Ring', 'set' => 'c21', 'set_name' => 'Commander 2021', 'collector_number' => '263']);
+
+        $this->client->request('POST', sprintf('/api/stores/%s/csv-imports/%d/failed/preview', $this->store->getSlug(), $job->getId()));
+        self::assertResponseIsSuccessful();
+
+        $body = json_decode($this->client->getResponse()->getContent(), true);
+        self::assertArrayHasKey('card', $body['results'][0], 'a set-name row should still preview a matched card');
+        self::assertSame('Sol Ring', $body['results'][0]['card']['name']);
+        self::assertSame('c21', $body['results'][0]['card']['setCode']);
+    }
+
     public function testRecoveryEndpointsRejectNonOwner(): void
     {
         [$job] = $this->jobWithFailedRow('Sol Ring', 'c21', '263');

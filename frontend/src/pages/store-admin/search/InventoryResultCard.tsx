@@ -3,6 +3,7 @@ import { cardImage, formatPrice, formatScryfallPrice } from '../../../api/client
 import type { InventoryItem } from '../../../api/types'
 import { Badge, Button } from '../../../components/ui'
 import { cx } from '../../../lib/cx'
+import { parseInventoryNotes } from '../../../lib/inventoryNotes'
 import { FOIL_GRADIENT, rarityAccent } from '../../../lib/mtg'
 
 export interface InventoryResultCardProps {
@@ -16,6 +17,7 @@ export interface InventoryResultCardProps {
 export function InventoryResultCard({ item, onEdit, onDelete, deleting }: InventoryResultCardProps) {
   const accent = rarityAccent(item.card.rarity)
   const image = cardImage(item.card)
+  const notes = parseInventoryNotes(item.notes)
   return (
     <div className="group flex gap-4 rounded-card border border-border bg-surface p-4 shadow-card transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgb(16_24_40_/0.25)]">
       <div
@@ -78,9 +80,11 @@ export function InventoryResultCard({ item, onEdit, onDelete, deleting }: Invent
             <Badge tone="neutral">Nonfoil</Badge>
           )}
           <Badge tone="brand">{item.quantity} in stock</Badge>
+          {notes.variant && <Badge tone="neutral">{notes.variant}</Badge>}
+          {notes.game && <Badge tone="neutral">{notes.game}</Badge>}
         </div>
 
-        {item.notes && <p className="mt-2 line-clamp-1 text-xs text-fg-muted">{item.notes}</p>}
+        {notes.text && <p className="mt-2 line-clamp-1 text-xs text-fg-muted">{notes.text}</p>}
 
         <div className="mt-auto grid grid-cols-2 gap-3 pt-3 text-sm">
           <div>

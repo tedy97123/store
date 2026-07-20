@@ -133,8 +133,11 @@ final readonly class ProcessCsvImportMessageHandler
                     $card = $resolution->card;
                 }
 
+                // "Game: Magic" is pure noise on an MTG platform (it ends up
+                // printed on every inventory tile); only keep a game note when
+                // it names something else.
                 $notes = [
-                    '' !== $row->getGame() ? 'Game: '.$row->getGame() : '',
+                    '' !== $row->getGame() && !CsvImportRow::isMagicGame($row->getGame()) ? 'Game: '.$row->getGame() : '',
                     '' !== $row->getVariant() ? 'Variant: '.$row->getVariant() : '',
                 ];
                 $notes = implode("\n", array_values(array_filter($notes)));
