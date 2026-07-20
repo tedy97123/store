@@ -12,6 +12,7 @@ use App\Repository\CardRepository;
 use App\Repository\CsvImportJobRepository;
 use App\Repository\CsvImportRowRepository;
 use App\Repository\StoreRepository;
+use App\Security\ApiRateLimit;
 use App\Service\Catalog\CatalogCardResolver;
 use App\Service\CsvImport\CsvImportParser;
 use App\Service\Inventory\StoreInventoryWriter;

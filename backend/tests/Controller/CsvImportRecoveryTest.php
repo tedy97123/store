@@ -138,4 +138,18 @@ final class CsvImportRecoveryTest extends WebTestCase
 
         self::assertSame(403, $this->client->getResponse()->getStatusCode());
     }
+
+    /**
+     * Regression: the upload endpoint runs ApiRateLimit::enforce() before the
+     * file check, so a POST with no file still executes that line. If the
+     * controller is missing `use App\Security\ApiRateLimit;`, PHP tries to load
+     * App\Controller\ApiRateLimit and fatals — every upload 500s. We assert the
+     * benign 400 ("a CSV file is required") to prove the class resolves.
+     */
+    public function testUploadEndpointResolvesRateLimiter(): void
+    {
+        $this->client->request('POST', sprintf('/api/stores/%s/csv-imports', $this->store->getSlug()));
+
+        self::assertSame(400, $this->client->getResponse()->getStatusCode());
+    }
 }
