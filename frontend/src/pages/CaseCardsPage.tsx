@@ -1,19 +1,16 @@
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, GalleryHorizontalEnd, Gem, Sparkles } from 'lucide-react'
+import { ArrowLeft, GalleryHorizontalEnd } from 'lucide-react'
 import { cardImage, formatPrice } from '../api/client'
 import { useStore, useStoreCases, useStoreTheme } from '../hooks'
-import { EmptyState, LoadingPanel, buttonVariants } from '../components/ui'
-import { InteractiveCard } from '../components/cards'
-import { rarityAccent } from '../lib/mtg'
+import { Card, CardBody, EmptyState, LoadingPanel, buttonVariants } from '../components/ui'
 import type { StoreSectionCard } from '../api/types'
 
 /**
- * Storefront Case Cards page (/s/:slug/case-cards). Each display case renders
- * as a physical showcase — metal frame, engraved plaque, ceiling spotlights, a
- * slow glass reflection, and lit shelves — with every color derived from the
- * store's own theme (see the .case-* classes in index.css), so the case
- * furniture matches the storefront's branding. Cards are holographic tilt
- * tiles; sold-out pool cards, empty sections, and empty cases are hidden.
+ * Storefront Case Cards page (/s/:slug/case-cards). Deliberately restrained:
+ * each display case is a clean surface panel in the store's own theme, its
+ * sections laid out as responsive grids of lightweight static tiles — no
+ * animations, no side-scrolling — so the whole case scans at a glance.
+ * Sold-out pool cards, empty sections, and empty cases are hidden.
  */
 export default function CaseCardsPage() {
   const { slug = '' } = useParams()
@@ -36,27 +33,18 @@ export default function CaseCardsPage() {
     .filter((storeCase) => storeCase.sections.length > 0)
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <div className="space-y-4">
         <Link to={`/s/${slug}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
           <ArrowLeft aria-hidden className="size-4" />
           Back to {store?.name ?? 'store'}
         </Link>
 
-        {/* Marquee header — this is the store's premium showcase. */}
-        <div className="flex flex-col items-center gap-2 py-4 text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[0.7rem] font-bold uppercase tracking-[0.2em] text-fg-muted">
-            <Gem aria-hidden className="size-3.5 text-brand-500" />
-            {store?.name ?? 'Store'} showcase
-          </span>
-          <h1 className="font-display text-4xl font-extrabold tracking-tight text-fg sm:text-5xl">
-            Case{' '}
-            <span className="bg-gradient-to-r from-brand-500 via-accent-500 to-brand-700 bg-clip-text text-transparent">
-              Cards
-            </span>
-          </h1>
-          <p className="max-w-xl text-sm text-fg-muted sm:text-base">
-            The singles behind the glass — hand-picked, graded, and ready to go home with you.
+        <div>
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-fg">Case cards</h1>
+          <div className="mt-2 h-1 w-12 rounded-full bg-brand-500" aria-hidden />
+          <p className="mt-3 max-w-xl text-sm text-fg-muted">
+            The singles in {store?.name ?? 'the store'}'s display cases — hand-picked and ready to go.
           </p>
         </div>
       </div>
@@ -76,42 +64,31 @@ export default function CaseCardsPage() {
           description="This store hasn't featured any cards in its cases yet. Check back soon."
         />
       ) : (
-        <div className="space-y-12">
+        <div className="space-y-8">
           {visibleCases.map((storeCase) => (
-            <section key={storeCase.id} aria-label={`Display case: ${storeCase.name}`} className="case-frame">
-              <div className="case-interior case-spotlights case-glass px-4 pb-8 pt-5 sm:px-8">
-                {/* Engraved brass plaque */}
-                <div className="relative z-10 mb-6 flex justify-center">
-                  <span className="case-plaque inline-flex items-center gap-2 px-5 py-1.5 font-display text-sm font-bold uppercase tracking-[0.18em]">
-                    <Sparkles aria-hidden className="size-3.5" />
-                    {storeCase.name}
+            <Card key={storeCase.id} aria-label={`Display case: ${storeCase.name}`}>
+              <CardBody className="space-y-8">
+                <div className="flex items-baseline justify-between gap-3 border-b border-border pb-3">
+                  <h2 className="font-display text-xl font-bold tracking-tight text-fg">{storeCase.name}</h2>
+                  <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">
+                    {caseCardCount(storeCase.sections)} cards
                   </span>
                 </div>
 
-                <div className="relative z-10 space-y-10">
-                  {storeCase.sections.map((section) => (
-                    <div key={section.id}>
-                      <div className="mb-4 flex items-baseline justify-between gap-3">
-                        <h3 className="case-label font-display text-xs font-bold uppercase tracking-[0.22em]">
-                          {section.title}
-                        </h3>
-                        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-white/40">
-                          {section.cards.length} card{section.cards.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-
-                      {/* The shelf: card rail + lit shelf edge beneath. */}
-                      <div className="flex snap-x gap-5 overflow-x-auto pb-4 pt-1">
-                        {section.cards.map((entry) => (
-                          <CaseCardTile key={entry.id} slug={slug} entry={entry} />
-                        ))}
-                      </div>
-                      <div className="case-shelf" aria-hidden />
+                {storeCase.sections.map((section) => (
+                  <section key={section.id}>
+                    <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
+                      {section.title}
+                    </h3>
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+                      {section.cards.map((entry) => (
+                        <CaseCardTile key={entry.id} slug={slug} entry={entry} />
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+                  </section>
+                ))}
+              </CardBody>
+            </Card>
           ))}
         </div>
       )}
@@ -123,45 +100,45 @@ type RenderableCard = StoreSectionCard & {
   inventoryItem: StoreSectionCard['inventoryItem'] & { card: NonNullable<StoreSectionCard['inventoryItem']['card']> }
 }
 
+function caseCardCount(sections: { cards: RenderableCard[] }[]): number {
+  return sections.reduce((total, section) => total + section.cards.length, 0)
+}
+
 /**
- * One card on a shelf: the holographic tilt card with a light-on-dark caption
- * and a brand-toned price tag. Links to the listing's details page.
+ * One case card: a static, fast tile — lazy image, name, set/finish, price.
+ * The only motion is a subtle hover lift. Links to the listing's details.
  */
 function CaseCardTile({ slug, entry }: { slug: string; entry: RenderableCard }) {
   const { inventoryItem } = entry
   const card = inventoryItem.card
+  const image = cardImage(card)
   const lastOne = entry.remaining === 1
 
   return (
     <Link
       to={`/s/${slug}/cards/${inventoryItem.id}`}
-      className="group relative w-40 flex-shrink-0 snap-start sm:w-52"
+      className="group relative rounded-card transition-transform duration-150 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
     >
       {lastOne && (
-        <span className="absolute right-2 top-2 z-20 rounded-full bg-accent-500 px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-white shadow">
+        <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-accent-500 px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-white shadow">
           Last one
         </span>
       )}
-      <InteractiveCard
-        image={cardImage(card)}
-        alt={card.name}
-        foil={inventoryItem.isFoil}
-        accent={rarityAccent(card.rarity)}
-        maxTilt={12}
-        shadow={false}
-      />
-      <div className="mt-3 px-0.5">
-        <h4 className="truncate font-display text-sm font-bold tracking-tight text-white/95 group-hover:underline">
-          {card.name}
-        </h4>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-xs uppercase tracking-wide text-white/45">
+      <div className="aspect-[5/7] overflow-hidden rounded-[4.5%/3.5%] bg-bg shadow-card">
+        {image ? (
+          <img src={image} alt={card.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        ) : (
+          <div className="grid h-full place-items-center px-2 text-center text-xs text-fg-muted">{card.name}</div>
+        )}
+      </div>
+      <div className="mt-2 px-0.5">
+        <h4 className="truncate text-sm font-bold text-fg group-hover:text-brand-600">{card.name}</h4>
+        <div className="mt-0.5 flex items-baseline justify-between gap-2">
+          <span className="truncate text-xs uppercase tracking-wide text-fg-muted">
             {card.setCode?.toUpperCase() ?? '—'}
             {inventoryItem.isFoil ? ' · Foil' : ''}
           </span>
-          <span className="case-plaque rounded px-1.5 py-0.5 text-xs font-black">
-            {formatPrice(inventoryItem.priceCents)}
-          </span>
+          <span className="text-sm font-bold text-fg">{formatPrice(inventoryItem.priceCents)}</span>
         </div>
       </div>
     </Link>
