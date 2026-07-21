@@ -211,110 +211,9 @@ body {
     animation: foil-flash var(--foil-shimmer-duration, 3.6s) ease-in-out infinite;
   }
 
-  /*
-   * Display-case chrome for the storefront Case Cards page. Every color is
-   * derived from the store's theme tokens (brand/accent/bg) via color-mix(),
-   * so a pink store gets a pink showcase, a blue store a blue one — while the
-   * case keeps its "physical display furniture" depth: metal frame, dark
-   * spotlit interior, glass reflection, lit shelves.
-   */
-  .case-frame {
-    /* Polished metal frame in the store's brand color: gradient border via padded background. */
-    background: linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--color-brand-500), black 30%) 0%,
-      color-mix(in srgb, var(--color-brand-500), white 42%) 18%,
-      color-mix(in srgb, var(--color-brand-500), black 16%) 42%,
-      color-mix(in srgb, var(--color-brand-500), white 58%) 60%,
-      color-mix(in srgb, var(--color-brand-500), black 30%) 100%
-    );
-    border-radius: 1.6rem;
-    padding: 6px;
-    box-shadow:
-      0 24px 60px -24px color-mix(in srgb, var(--color-brand-500), black 55%),
-      0 4px 14px rgb(0 0 0 / 0.22);
-  }
-  .case-interior {
-    position: relative;
-    overflow: hidden;
-    border-radius: 1.28rem;
-    /* Deep brand-tinted interior: always dark enough for light captions,
-       but unmistakably hued to the store's palette. */
-    background:
-      radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--color-brand-500), black 45%) 0%, transparent 55%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--color-brand-500), black 64%) 0%,
-        color-mix(in srgb, var(--color-brand-500), black 76%) 45%,
-        color-mix(in srgb, var(--color-brand-500), black 86%) 100%
-      );
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), inset 0 -18px 40px rgb(0 0 0 / 0.5);
-  }
-  /* Ceiling spotlights washing down over the merchandise, warmed by the accent. */
-  .case-spotlights::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(38% 55% at 18% -8%, color-mix(in srgb, var(--color-accent-500), white 65%) 0%, transparent 70%),
-      radial-gradient(38% 55% at 50% -8%, color-mix(in srgb, var(--color-accent-500), white 70%) 0%, transparent 70%),
-      radial-gradient(38% 55% at 82% -8%, color-mix(in srgb, var(--color-accent-500), white 65%) 0%, transparent 70%);
-    opacity: 0.16;
-  }
-  /* Angled glass reflection sweeping slowly across the front pane. */
-  .case-glass::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      115deg,
-      transparent 0%,
-      rgb(255 255 255 / 0.045) 32%,
-      rgb(255 255 255 / 0.12) 45%,
-      rgb(255 255 255 / 0.03) 55%,
-      transparent 75%
-    );
-    background-size: 260% 100%;
-    animation: case-glass-sweep 9s ease-in-out infinite;
-  }
-  .case-plaque {
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--color-brand-500), white 45%) 0%,
-      var(--color-brand-500) 48%,
-      color-mix(in srgb, var(--color-brand-500), black 22%) 100%
-    );
-    border: 1px solid color-mix(in srgb, var(--color-brand-500), black 45%);
-    border-radius: 0.45rem;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
-    color: #fff;
-    text-shadow: 0 1px 2px color-mix(in srgb, var(--color-brand-500), black 55%);
-  }
-  /* Lightened brand tone for labels/highlights on the dark interior. */
-  .case-label {
-    color: color-mix(in srgb, var(--color-brand-500), white 62%);
-  }
-  /* The lit shelf edge cards rest on. */
-  .case-shelf {
-    height: 3px;
-    border-radius: 9999px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      color-mix(in srgb, var(--color-brand-500), white 30%) 12%,
-      color-mix(in srgb, var(--color-brand-500), white 65%) 50%,
-      color-mix(in srgb, var(--color-brand-500), white 30%) 88%,
-      transparent 100%
-    );
-    box-shadow: 0 0 18px 2px color-mix(in srgb, var(--color-brand-500), transparent 55%);
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .tilt-holo,
-    .foil-shimmer,
-    .case-glass::after {
+    .foil-shimmer {
       animation: none;
     }
   }
@@ -329,19 +228,6 @@ body {
   }
   100% {
     background-position: 0% 50%;
-  }
-}
-
-@keyframes case-glass-sweep {
-  0%,
-  12% {
-    background-position: -160% 0%;
-  }
-  55% {
-    background-position: 160% 0%;
-  }
-  100% {
-    background-position: 160% 0%;
   }
 }
 
