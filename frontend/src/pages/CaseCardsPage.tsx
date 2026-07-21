@@ -9,10 +9,11 @@ import type { StoreSectionCard } from '../api/types'
 
 /**
  * Storefront Case Cards page (/s/:slug/case-cards). Each display case renders
- * as a physical glass-and-brass showcase — engraved plaque, ceiling
- * spotlights, a slow glass reflection, and lit shelves — with the store's
- * premium singles as holographic tilt cards on the shelves. Sold-out pool
- * cards, empty sections, and empty cases are hidden.
+ * as a physical showcase — metal frame, engraved plaque, ceiling spotlights, a
+ * slow glass reflection, and lit shelves — with every color derived from the
+ * store's own theme (see the .case-* classes in index.css), so the case
+ * furniture matches the storefront's branding. Cards are holographic tilt
+ * tiles; sold-out pool cards, empty sections, and empty cases are hidden.
  */
 export default function CaseCardsPage() {
   const { slug = '' } = useParams()
@@ -50,7 +51,7 @@ export default function CaseCardsPage() {
           </span>
           <h1 className="font-display text-4xl font-extrabold tracking-tight text-fg sm:text-5xl">
             Case{' '}
-            <span className="bg-gradient-to-r from-amber-500 via-brand-500 to-purple-500 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-brand-500 via-accent-500 to-brand-700 bg-clip-text text-transparent">
               Cards
             </span>
           </h1>
@@ -91,10 +92,10 @@ export default function CaseCardsPage() {
                   {storeCase.sections.map((section) => (
                     <div key={section.id}>
                       <div className="mb-4 flex items-baseline justify-between gap-3">
-                        <h3 className="font-display text-xs font-bold uppercase tracking-[0.22em] text-amber-200/90">
+                        <h3 className="case-label font-display text-xs font-bold uppercase tracking-[0.22em]">
                           {section.title}
                         </h3>
-                        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-zinc-500">
+                        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-white/40">
                           {section.cards.length} card{section.cards.length === 1 ? '' : 's'}
                         </span>
                       </div>
@@ -124,7 +125,7 @@ type RenderableCard = StoreSectionCard & {
 
 /**
  * One card on a shelf: the holographic tilt card with a light-on-dark caption
- * and a brass price tag. Links to the listing's details page.
+ * and a brand-toned price tag. Links to the listing's details page.
  */
 function CaseCardTile({ slug, entry }: { slug: string; entry: RenderableCard }) {
   const { inventoryItem } = entry
@@ -137,7 +138,7 @@ function CaseCardTile({ slug, entry }: { slug: string; entry: RenderableCard }) 
       className="group relative w-40 flex-shrink-0 snap-start sm:w-52"
     >
       {lastOne && (
-        <span className="absolute right-2 top-2 z-20 rounded-full bg-amber-400 px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-zinc-900 shadow">
+        <span className="absolute right-2 top-2 z-20 rounded-full bg-accent-500 px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-white shadow">
           Last one
         </span>
       )}
@@ -150,11 +151,11 @@ function CaseCardTile({ slug, entry }: { slug: string; entry: RenderableCard }) 
         shadow={false}
       />
       <div className="mt-3 px-0.5">
-        <h4 className="truncate font-display text-sm font-bold tracking-tight text-zinc-100 group-hover:text-amber-200">
+        <h4 className="truncate font-display text-sm font-bold tracking-tight text-white/95 group-hover:underline">
           {card.name}
         </h4>
         <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-xs uppercase tracking-wide text-zinc-500">
+          <span className="text-xs uppercase tracking-wide text-white/45">
             {card.setCode?.toUpperCase() ?? '—'}
             {inventoryItem.isFoil ? ' · Foil' : ''}
           </span>
